@@ -1,88 +1,130 @@
-CrossApp
+ # CrossApp
 
-Наскрізний проєкт з крос-платформного програмування.
+ Наскрізний проєкт з крос-платформного програмування на .NET.
 
-Предметна область: Склад. Сутності: Product (товар), StockBatch (партія), Warehouse (склад), Movement (переміщення). Призначення: облік залишків товарів по партіях.
+ ## Предметна область
 
-Запуск
-dotnet build
-dotnet run --project src/Cli
-Середовище
-.NET SDK 10.0.11
-macOS 26.6.2, arm64
-Додаткові завдання
-1. Self-contained publish під два RID
+ **Склад**: облік залишків товарів по партіях.
 
-Публікація виконана під дві різні платформи:
+ Основні сутності:
 
-dotnet publish src/Cli -c Release -r osx-arm64 --self-contained true
-dotnet publish src/Cli -c Release -r linux-x64 --self-contained true
+ - `Product` — товар;
+ - `StockBatch` — партія товару;
+ - `Warehouse` — склад;
+ - `Movement` — переміщення.
 
-Порівняння розміру каталогів публікації:
+ ## Середовище
 
-du -sh src/Cli/bin/Release/net10.0/osx-arm64/publish
-du -sh src/Cli/bin/Release/net10.0/linux-x64/publish
-RID	Розмір публікації
-osx-arm64	~83 MB
-linux-x64	~79 MB
+ - .NET SDK `10.0.11`;
+ - macOS `26.6.2`;
+ - архітектура `arm64`.
 
-Розмір включає весь .NET runtime, тому обидва каталоги значно більші за framework-dependent збірку (~150 KB для звичайного dotnet build).
+ ## Запуск
 
-2. Прапорець --json
+ З кореня проєкту виконайте:
 
-Додано підтримку виводу системної інформації у форматі JSON через System.Text.Json.
+ ```bash
+ dotnet build
+ dotnet run --project src/Cli
+ ```
 
-dotnet run --project src/Cli               # звичайний табличний вивід
-dotnet run --project src/Cli -- --json     # вивід у форматі JSON
+ ## Додаткові завдання
 
-Приклад JSON-виводу:
+ ### 1. Self-contained publish під два RID
 
-json
-{
-  "OsDescription": "macOS 26.6.2",
-  "OsVersion": "Unix 26.6.2",
-  "ProcessArchitecture": "Arm64",
-  "ClrVersion": "10.0.11",
-  "Runtime": ".NET 10.0.11",
-  "BaseDirectory": "/Users/roman/Desktop/labs/cpp/lab1/CrossApp/src/Cli/bin/Debug/net10.0/",
-  "CurrentDirectory": "/Users/roman/Desktop/labs/cpp/lab1/CrossApp",
-  "Domain": "Склад (товари, партії, залишки, переміщення)"
-}
-3. Запуск у Docker-контейнері
+ Публікація виконана під дві різні платформи:
 
-Спочатку запустіть Docker Desktop. Потім з кореня проєкту:
+ ```bash
+ dotnet publish src/Cli -c Release -r osx-arm64 --self-contained true
+ dotnet publish src/Cli -c Release -r linux-x64 --self-contained true
+ ```
 
-docker run --rm -v ${PWD}:/src -w /src mcr.microsoft.com/dotnet/sdk:10.0 \
-  dotnet run --project src/Cli
+ Порівняння розміру каталогів публікації:
 
-Локальний запуск:
+ ```bash
+ du -sh src/Cli/bin/Release/net10.0/osx-arm64/publish
+ du -sh src/Cli/bin/Release/net10.0/linux-x64/publish
+ ```
 
-CrossApp – практикум з крос-платформного програмування
-Студент: Сухар Роман, група ФеІ-36
-----------------------------------------------------
-ОС (OSDescription) : macOS 26.6.2
-ОС (Environment) : Unix 26.6.2
-Архітектура процесу : Arm64
-Версія .NET (CLR) : 10.0.11
-Runtime : .NET 10.0.11
-Каталог застосунку : /Users/roman/Desktop/labs/cpp/lab1/CrossApp/src/Cli/bin/Debug/net10.0/
-Поточний каталог : /Users/roman/Desktop/labs/cpp/lab1/CrossApp
-----------------------------------------------------
-Предметна область: Склад (товари, партії, залишки, переміщення)
+ | RID | Розмір публікації |
+ | --- | ---: |
+ | `osx-arm64` | ~83 MB |
+ | `linux-x64` | ~79 MB |
 
-Контейнеризований запуск:
+ Розмір включає весь .NET runtime, тому обидва каталоги значно більші за framework-dependent збірку (~150 KB для звичайного `dotnet build`).
 
-CrossApp – практикум з крос-платформного програмування
-Студент: Сухар Роман, група ФеІ-36
-----------------------------------------------------
-ОС (OSDescription) : Ubuntu 24.04.4 LTS
-ОС (Environment) : Unix 5.15.49.0
-Архітектура процесу : Arm64
-Версія .NET (CLR) : 10.0.11
-Runtime : .NET 10.0.11
-Каталог застосунку : /src/src/Cli/bin/Debug/net10.0/
-Поточний каталог : /src
-----------------------------------------------------
-Предметна область: Склад (товари, партії, залишки, переміщення)
+ ### 2. Прапорець `--json`
 
-Висновок: той самий код без жодних змін компілюється та виконується як на macOS (arm64), так і в Linux-контейнері (Ubuntu 24.04, arm64) — з різними значеннями OSDescription та шляхів (AppContext.BaseDirectory, Environment.CurrentDirectory), але з однаковою поведінкою програми. Це і є практичним доказом крос-платформності .NET.
+ Додано підтримку виводу системної інформації у форматі JSON через `System.Text.Json`.
+
+ ```bash
+ # Звичайний табличний вивід
+ dotnet run --project src/Cli
+
+ # Вивід у форматі JSON
+ dotnet run --project src/Cli -- --json
+ ```
+
+ Приклад JSON-виводу:
+
+ ```json
+ {
+   "OsDescription": "macOS 26.6.2",
+   "OsVersion": "Unix 26.6.2",
+   "ProcessArchitecture": "Arm64",
+   "ClrVersion": "10.0.11",
+   "Runtime": ".NET 10.0.11",
+   "BaseDirectory": "/Users/roman/Desktop/labs/cpp/lab1/CrossApp/src/Cli/bin/Debug/net10.0/",
+   "CurrentDirectory": "/Users/roman/Desktop/labs/cpp/lab1/CrossApp",
+   "Domain": "Склад (товари, партії, залишки, переміщення)"
+ }
+ ```
+
+ ### 3. Запуск у Docker-контейнері
+
+ Спочатку запустіть Docker Desktop. Потім виконайте команду з кореня проєкту:
+
+ ```bash
+ docker run --rm -v ${PWD}:/src -w /src mcr.microsoft.com/dotnet/sdk:10.0 \
+   dotnet run --project src/Cli
+ ```
+
+ ## Приклад локального запуску
+
+ ```text
+ CrossApp – практикум з крос-платформного програмування
+ Студент: Сухар Роман, група ФеІ-36
+ ----------------------------------------------------
+ ОС (OSDescription) : macOS 26.6.2
+ ОС (Environment) : Unix 26.6.2
+ Архітектура процесу : Arm64
+ Версія .NET (CLR) : 10.0.11
+ Runtime : .NET 10.0.11
+ Каталог застосунку : /Users/roman/Desktop/labs/cpp/lab1/CrossApp/src/Cli/bin/Debug/net10.0/
+ Поточний каталог : /Users/roman/Desktop/labs/cpp/lab1/CrossApp
+ ----------------------------------------------------
+ Предметна область: Склад (товари, партії, залишки, переміщення)
+ ```
+
+ ## Приклад запуску в контейнері
+
+ ```text
+ CrossApp – практикум з крос-платформного програмування
+ Студент: Сухар Роман, група ФеІ-36
+ ----------------------------------------------------
+ ОС (OSDescription) : Ubuntu 24.04.4 LTS
+ ОС (Environment) : Unix 5.15.49.0
+ Архітектура процесу : Arm64
+ Версія .NET (CLR) : 10.0.11
+ Runtime : .NET 10.0.11
+ Каталог застосунку : /src/src/Cli/bin/Debug/net10.0/
+ Поточний каталог : /src
+ ----------------------------------------------------
+ Предметна область: Склад (товари, партії, залишки, переміщення)
+ ```
+
+ ## Висновок
+
+ Той самий код без жодних змін компілюється та виконується як на macOS (arm64), так і в Linux-контейнері (Ubuntu 24.04, arm64). Відрізняються лише значення `OSDescription` і шляхів `AppContext.BaseDirectory` та `Environment.CurrentDirectory`, а поведінка програми залишається однаковою.
+
+ Це є практичним доказом крос-платформності .NET.
