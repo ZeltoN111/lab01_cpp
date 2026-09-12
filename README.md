@@ -19,68 +19,241 @@
  - macOS `26.6.2`;
  - архітектура `arm64`.
 
- ## Запуск
+ ## Структура solution
 
- З кореня проєкту виконайте:
+ ```text
+ CrossApp/
+   CrossApp.slnx
+   README.md
+   .gitignore
+   src/
+     Core/
+       Core.csproj              (multi-targeting: net8.0;net10.0)
+       EnvironmentInfo.cs        (namespace Core)
+     Cli/
+       Cli.csproj                (ProjectReference на Core; multi-targeting: net10.0;net8.0)
+       Program.cs
+ ```
+
+ `Core` — class library без точки входу: збирає інформацію про середовище і повертає її
+ у вигляді запису (`record`), нічого не друкує. `Cli` — консольний застосунок з `Main`
+ (top-level statements), який лише форматує та виводить те, що дав `Core`.
+ Залежність напрямлена в один бік: `Cli` → `Core`. `Core` про `Cli` нічого не знає.
+
+ ## Команди: додавання Core і посилання
+
+ Виконано одноразово при створенні `Core`:
+
+ ```bash
+ dotnet new classlib -n Core -o src/Core -f net10.0
+ dotnet sln add src/Core/Core.csproj
+ dotnet add src/Cli/Cli.csproj reference src/Core/Core.csproj
+ rm src/Core/Class1.cs
+ ```
+
+ Перевірка, що посилання з'явилося:
+
+ ```bash
+ cat src/Cli/Cli.csproj
+ # має бути: <ProjectReference Include="..\Core\Core.csproj" />
+ ```
+
+ ## Build / Run
 
  ```bash
  dotnet build
  dotnet run --project src/Cli
  ```
 
+ ## Публікація: self-contained vs framework-dependent
+
+ Кожен варіант — в окрему папку `-o`, щоб не перезаписувати попередній результат:
+
+ ```bash
+ # self-contained
+ dotnet publish src/Cli -c Release -f net10.0 -r osx-arm64 --self-contained true  -o publish/osx-arm64-sc
+ dotnet publish src/Cli -c Release -f net10.0 -r win-x64    --self-contained true  -o publish/win-x64-sc
+
+ # framework-dependent
+ dotnet publish src/Cli -c Release -f net10.0 -r win-x64    --self-contained false -o publish/win-x64-fd
+ ```
+
+ > Прапорець `-f net10.0` обов'язковий, бо `Cli.csproj` тепер multi-target
+ > (`net10.0;net8.0`) — без нього `dotnet publish` падає з помилкою
+ > `NETSDK1129: ... must specify one of the following frameworks`.
+
+ Запуск опублікованого застосунку напряму (не через `dotnet run`):
+
+ ```bash
+ cd publish/osx-arm64-sc
+ chmod +x Cli
+ ./Cli
+ cd ../..
+ ```
+
+ Windows-публікація містить `Cli.exe` замість `Cli` і виконується лише на Windows —
+ бінарник під один RID не запускається на іншій ОС (це не помилка, а очікувана поведінка).
+
+ ### Порівняння режимів публікації
+
+ | RID | Режим | Розмір публікації | Потрібен встановлений runtime |
+ | --- | --- | ---: | :---: |
+ | `osx-arm64` | self-contained | ~83 МБ | ні |
+ | `win-x64` | self-contained | ~77 МБ | ні |
+ | `win-x64` | framework-dependent | ~208 КБ | так (.NET 10 Runtime) |
+
+ Self-contained публікація включає весь .NET runtime і всі системні збірки, тому важить
+ десятки мегабайт незалежно від розміру власного коду. Framework-dependent публікація
+ містить лише код застосунку (`Cli.dll`, `Core.dll` і конфіг) і покладається на те, що на
+ цільовій машині вже встановлено відповідний .NET Runtime — тому важить кілобайти.
+
+ ## Multi-targeting
+
+ І `Core.csproj`, і `Cli.csproj` збираються одразу для двох TFM:
+
+ ```xml
+ <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+ ```
+
+ Після `dotnet build` у `bin/Debug/` з'являються окремі підкаталоги `net8.0/` і
+ `net10.0/`, кожен зі своєю збіркою. Умовна компіляція показана в
+ `src/Core/EnvironmentInfo.cs`:
+
+ ```csharp
+ #if NET10_0_OR_GREATER
+     private const string BuildNote = "збірка під net10.0";
+ #else
+     private const string BuildNote = "збірка під net8.0";
+ #endif
+ ```
+
+ Різницю видно у виводі при запуску під різними TFM:
+
+ ```bash
+ dotnet run --project src/Cli -f net10.0
+ dotnet run --project src/Cli -f net8.0
+ ```
+
+ net10.0:
+ ```text
+ ОС             : macOS 26.6.2
+ Runtime        : .NET 10.0.11
+ Каталог        : .../src/Cli/bin/Debug/net10.0/
+ Збірка         : збірка під net10.0
+ ```
+
+ net8.0:
+ ```text
+ ОС             : Darwin 25.6.0 Darwin Kernel Version 25.6.0: ...; root:xnu-12377.161.14~5/RELEASE_ARM64_T8103
+ Runtime        : .NET 8.0.31
+ Каталог        : .../src/Cli/bin/Debug/net8.0/
+ Збірка         : збірка під net8.0
+ ```
+
+ Різні `Runtime`, різний (детальніший) формат `OsDescription` під net8.0 і різний
+ `BuildNote` — усе це резолвиться компілятором окремо для кожного TFM ще на етапі
+ збірки, без жодного `if` під час виконання.
+
+ ## Приклад локального запуску (`dotnet run`)
+
+ ```text
+ CrossApp – інформація про середовище
+ ----------------------------------------------------
+ ОС             : macOS 26.6.2
+ Runtime        : .NET 10.0.11
+ Архітектура    : Arm64
+ RID (визначено): osx-arm64
+ RID (від .NET) : osx-arm64
+ Каталог        : /Users/roman/Desktop/labs/cpp/lab1/CrossApp/src/Cli/bin/Debug/net10.0/
+ Збірка         : збірка під net10.0
+ ```
+
+ ## Приклад запуску з каталогу publish (`./Cli`, self-contained osx-arm64)
+
+ ```text
+ CrossApp – інформація про середовище
+ ----------------------------------------------------
+ ОС             : macOS 26.6.2
+ Runtime        : .NET 10.0.11
+ Архітектура    : Arm64
+ RID (визначено): osx-arm64
+ RID (від .NET) : osx-arm64
+ Каталог        : /Users/roman/Desktop/labs/cpp/lab1/CrossApp/publish/osx-arm64-sc/
+ Збірка         : збірка під net10.0
+ ```
+
+ Вивід ідентичний виводу `dotnet run` за змістом — відрізняється лише `Каталог`, бо
+ застосунок запущено з іншого місця на диску.
+
  ## Додаткові завдання
 
  ### 1. Self-contained publish під два RID
 
- Публікація виконана під дві різні платформи:
+ Публікація виконана під дві різні платформи (див. таблицю вище):
 
  ```bash
- dotnet publish src/Cli -c Release -r osx-arm64 --self-contained true
- dotnet publish src/Cli -c Release -r linux-x64 --self-contained true
+ dotnet publish src/Cli -c Release -f net10.0 -r osx-arm64 --self-contained true -o publish/osx-arm64-sc
+ dotnet publish src/Cli -c Release -f net10.0 -r win-x64 --self-contained true -o publish/win-x64-sc
  ```
 
- Порівняння розміру каталогів публікації:
+ Розмір включає весь .NET runtime, тому обидва каталоги значно більші за
+ framework-dependent збірку (~208 КБ).
+
+ ### 2. `PublishSingleFile=true`
 
  ```bash
- du -sh src/Cli/bin/Release/net10.0/osx-arm64/publish
- du -sh src/Cli/bin/Release/net10.0/linux-x64/publish
+ dotnet publish src/Cli -c Release -f net10.0 -r osx-arm64 --self-contained true \
+   -p:PublishSingleFile=true -o publish/osx-arm64-singlefile
  ```
 
- | RID | Розмір публікації |
- | --- | ---: |
- | `osx-arm64` | ~83 MB |
- | `linux-x64` | ~79 MB |
+ | Варіант | Файлів у каталозі | Розмір | Запускається |
+ | --- | ---: | ---: | :---: |
+ | self-contained (звичайний) | 193 | 83 МБ | так |
+ | self-contained + `PublishSingleFile` | 3 | 76 МБ | так |
 
- Розмір включає весь .NET runtime, тому обидва каталоги значно більші за framework-dependent збірку (~150 KB для звичайного `dotnet build`).
+ Кількість файлів впала з 193 до 3 (виконуваний `Cli`, `.pdb` і конфіг) — усі
+ `System.*.dll` запаковані всередину одного бінарника. Розмір при цьому суттєво **не**
+ зменшився (76 МБ проти 83 МБ) — увесь runtime і так входив до self-contained публікації,
+ single file лише змінює спосіб пакування, а не прибирає код. Запускається так само, як
+ і звичайний self-contained (`./Cli`), вивід ідентичний.
 
- ### 2. Прапорець `--json`
-
- Додано підтримку виводу системної інформації у форматі JSON через `System.Text.Json`.
+ ### 3. `PublishTrimmed=true`
 
  ```bash
- # Звичайний табличний вивід
- dotnet run --project src/Cli
-
- # Вивід у форматі JSON
- dotnet run --project src/Cli -- --json
+ dotnet publish src/Cli -c Release -f net10.0 -r osx-arm64 --self-contained true \
+   -p:PublishTrimmed=true -o publish/osx-arm64-trimmed
  ```
 
- Приклад JSON-виводу:
+ | Варіант | Розмір | Попередження збірки |
+ | --- | ---: | --- |
+ | self-contained (без trim) | 83 МБ | — |
+ | self-contained + `PublishTrimmed` | 20 МБ | 0 (жодних `warning IL2xxx`) |
 
- ```json
- {
-   "OsDescription": "macOS 26.6.2",
-   "OsVersion": "Unix 26.6.2",
-   "ProcessArchitecture": "Arm64",
-   "ClrVersion": "10.0.11",
-   "Runtime": ".NET 10.0.11",
-   "BaseDirectory": "/Users/roman/Desktop/labs/cpp/lab1/CrossApp/src/Cli/bin/Debug/net10.0/",
-   "CurrentDirectory": "/Users/roman/Desktop/labs/cpp/lab1/CrossApp",
-   "Domain": "Склад (товари, партії, залишки, переміщення)"
- }
- ```
+ Розмір впав з 83 МБ до 20 МБ — trimmer прибрав усі невикористані частини .NET runtime
+ (наприклад `System.Data`, `System.Net.Http` тощо, які код застосунку не викликає).
+ Попереджень немає, тому що в `EnvironmentInfo`/`Program.cs` немає рефлексії — увесь
+ виклик статичний (`RuntimeInformation.*`, звичайні поля record).
 
- ### 3. Запуск у Docker-контейнері
+ **Чому trimming небезпечний для коду з рефлексією.** Trimmer аналізує граф викликів
+ статично: він бачить прямі виклики методів у джерельному коді (`SomeType.Method()`) і
+ лишає лише те, до чого є видимий шлях від `Main`. Рефлексія
+ (`Type.GetType("Ns.SomeType")`, `Activator.CreateInstance(...)`, серіалізатори без
+ source-generation, DI-контейнери, що резолвлять типи за рядком) звертається до
+ типів/методів **за назвою під час виконання** — цього виклику компілятор не бачить
+ заздалегідь. Тому trimmer може вирішити, що тип чи метод ніким не використовується, і
+ видалити його з фінальної збірки. Наслідок — застосунок компілюється без помилок, а
+ падає вже під час виконання з `MissingMethodException` / `TypeLoadException`, бо
+ потрібного коду фізично немає в опублікованих DLL. Такий код лишається безпечним для
+ trimming тільки якщо явно позначити залежності атрибутом `DynamicDependency` або
+ задати root-descriptor, і після цього обов'язково прогнати повне тестування, а не
+ лише перевірити, що збірка пройшла без помилок.
+
+ ### 4. Multi-targeting з різним виводом на TFM
+
+ Див. секцію [Multi-targeting](#multi-targeting) вище — `BuildNote` через `#if
+ NET10_0_OR_GREATER`, показано реальний вивід під net10.0 і net8.0.
+
+ ### 5. Запуск у Docker-контейнері
 
  Спочатку запустіть Docker Desktop. Потім виконайте команду з кореня проєкту:
 
@@ -89,42 +262,54 @@
    dotnet run --project src/Cli
  ```
 
- ## Приклад локального запуску
+ ## Самоперевірка
 
- ```text
- CrossApp – практикум з крос-платформного програмування
- Студент: Сухар Роман, група ФеІ-36
- ----------------------------------------------------
- ОС (OSDescription) : macOS 26.6.2
- ОС (Environment) : Unix 26.6.2
- Архітектура процесу : Arm64
- Версія .NET (CLR) : 10.0.11
- Runtime : .NET 10.0.11
- Каталог застосунку : /Users/roman/Desktop/labs/cpp/lab1/CrossApp/src/Cli/bin/Debug/net10.0/
- Поточний каталог : /Users/roman/Desktop/labs/cpp/lab1/CrossApp
- ----------------------------------------------------
- Предметна область: Склад (товари, партії, залишки, переміщення)
+ ```bash
+ dotnet sln list                              # два проєкти в solution?
+ grep -n "RuntimeInformation" src/Cli/Program.cs   # має нічого не знайти
+ dotnet build src/Core/Core.csproj            # Core збирається окремо?
+
+ # перевірка циклічної залежності (і скасування):
+ dotnet add src/Core/Core.csproj reference src/Cli/Cli.csproj
+ dotnet build src/Core/Core.csproj
+ dotnet remove src/Core/Core.csproj reference src/Cli/Cli.csproj
+
+ git status                                    # publish/bin/obj не в staged
  ```
 
- ## Приклад запуску в контейнері
+ ## Definition of Done
 
- ```text
- CrossApp – практикум з крос-платформного програмування
- Студент: Сухар Роман, група ФеІ-36
- ----------------------------------------------------
- ОС (OSDescription) : Ubuntu 24.04.4 LTS
- ОС (Environment) : Unix 5.15.49.0
- Архітектура процесу : Arm64
- Версія .NET (CLR) : 10.0.11
- Runtime : .NET 10.0.11
- Каталог застосунку : /src/src/Cli/bin/Debug/net10.0/
- Поточний каталог : /src
- ----------------------------------------------------
- Предметна область: Склад (товари, партії, залишки, переміщення)
+ ```bash
+ dotnet build                     # solution збирається цілком
+ dotnet run --project src/Cli     # вивід лише з Core, Program.cs без логіки
+ ls publish/                      # є publish хоча б для однієї RID
+ git status --short                # bin/obj/publish не в репозиторії
+ ```
+
+ - [x] Два проєкти в solution, посилання `Cli` → `Core`
+ - [x] Уся «інформація про середовище» живе в `Core`, `Cli` лише форматує вивід
+ - [x] `Program.cs` не містить жодної логіки, окрім виводу
+ - [x] Є publish хоча б для однієї RID, застосунок запускається з каталогу publish
+ - [x] README пояснює різницю self-contained vs framework-dependent і містить таблицю
+ - [x] Каталоги `bin`/`obj`/`publish` не в репозиторії
+ - [ ] Коміт `lab02`
+
+ ## Коміт
+
+ ```bash
+ git add src/Core src/Cli CrossApp.slnx README.md
+ git status
+ git commit -m "lab02: Core class library, ProjectReference Cli->Core, multi-targeting, publish self-contained/framework-dependent"
  ```
 
  ## Висновок
 
- Той самий код без жодних змін компілюється та виконується як на macOS (arm64), так і в Linux-контейнері (Ubuntu 24.04, arm64). Відрізняються лише значення `OSDescription` і шляхів `AppContext.BaseDirectory` та `Environment.CurrentDirectory`, а поведінка програми залишається однаковою.
+ Той самий код без жодних змін компілюється та виконується як на macOS (arm64), так і на
+ Windows (win-x64) чи в Linux-контейнері. Спільна логіка збору інформації про середовище
+ винесена в `Core` і не залежить від того, як саме її буде показано — консоллю (`Cli`) чи,
+ у майбутньому, іншим клієнтом (`Api`, Blazor). Відрізняються лише значення, які повертає
+ `RuntimeInformation`, та розмір і склад publish-каталогу залежно від обраного режиму
+ публікації (self-contained / framework-dependent / single-file / trimmed).
 
- Це є практичним доказом крос-платформності .NET.
+ Це є практичним доказом крос-платформності .NET і практичної цінності поділу
+ «бібліотека Core + точка входу».
