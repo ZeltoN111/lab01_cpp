@@ -234,20 +234,6 @@
  Попереджень немає, тому що в `EnvironmentInfo`/`Program.cs` немає рефлексії — увесь
  виклик статичний (`RuntimeInformation.*`, звичайні поля record).
 
- **Чому trimming небезпечний для коду з рефлексією.** Trimmer аналізує граф викликів
- статично: він бачить прямі виклики методів у джерельному коді (`SomeType.Method()`) і
- лишає лише те, до чого є видимий шлях від `Main`. Рефлексія
- (`Type.GetType("Ns.SomeType")`, `Activator.CreateInstance(...)`, серіалізатори без
- source-generation, DI-контейнери, що резолвлять типи за рядком) звертається до
- типів/методів **за назвою під час виконання** — цього виклику компілятор не бачить
- заздалегідь. Тому trimmer може вирішити, що тип чи метод ніким не використовується, і
- видалити його з фінальної збірки. Наслідок — застосунок компілюється без помилок, а
- падає вже під час виконання з `MissingMethodException` / `TypeLoadException`, бо
- потрібного коду фізично немає в опублікованих DLL. Такий код лишається безпечним для
- trimming тільки якщо явно позначити залежності атрибутом `DynamicDependency` або
- задати root-descriptor, і після цього обов'язково прогнати повне тестування, а не
- лише перевірити, що збірка пройшла без помилок.
-
  ### 4. Multi-targeting з різним виводом на TFM
 
  Див. секцію [Multi-targeting](#multi-targeting) вище — `BuildNote` через `#if
@@ -262,54 +248,4 @@
    dotnet run --project src/Cli
  ```
 
- ## Самоперевірка
-
- ```bash
- dotnet sln list                              # два проєкти в solution?
- grep -n "RuntimeInformation" src/Cli/Program.cs   # має нічого не знайти
- dotnet build src/Core/Core.csproj            # Core збирається окремо?
-
- # перевірка циклічної залежності (і скасування):
- dotnet add src/Core/Core.csproj reference src/Cli/Cli.csproj
- dotnet build src/Core/Core.csproj
- dotnet remove src/Core/Core.csproj reference src/Cli/Cli.csproj
-
- git status                                    # publish/bin/obj не в staged
- ```
-
- ## Definition of Done
-
- ```bash
- dotnet build                     # solution збирається цілком
- dotnet run --project src/Cli     # вивід лише з Core, Program.cs без логіки
- ls publish/                      # є publish хоча б для однієї RID
- git status --short                # bin/obj/publish не в репозиторії
- ```
-
- - [x] Два проєкти в solution, посилання `Cli` → `Core`
- - [x] Уся «інформація про середовище» живе в `Core`, `Cli` лише форматує вивід
- - [x] `Program.cs` не містить жодної логіки, окрім виводу
- - [x] Є publish хоча б для однієї RID, застосунок запускається з каталогу publish
- - [x] README пояснює різницю self-contained vs framework-dependent і містить таблицю
- - [x] Каталоги `bin`/`obj`/`publish` не в репозиторії
- - [ ] Коміт `lab02`
-
- ## Коміт
-
- ```bash
- git add src/Core src/Cli CrossApp.slnx README.md
- git status
- git commit -m "lab02: Core class library, ProjectReference Cli->Core, multi-targeting, publish self-contained/framework-dependent"
- ```
-
- ## Висновок
-
- Той самий код без жодних змін компілюється та виконується як на macOS (arm64), так і на
- Windows (win-x64) чи в Linux-контейнері. Спільна логіка збору інформації про середовище
- винесена в `Core` і не залежить від того, як саме її буде показано — консоллю (`Cli`) чи,
- у майбутньому, іншим клієнтом (`Api`, Blazor). Відрізняються лише значення, які повертає
- `RuntimeInformation`, та розмір і склад publish-каталогу залежно від обраного режиму
- публікації (self-contained / framework-dependent / single-file / trimmed).
-
- Це є практичним доказом крос-платформності .NET і практичної цінності поділу
- «бібліотека Core + точка входу».
+ 
