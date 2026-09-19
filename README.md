@@ -263,113 +263,28 @@
 
  ## Лабораторна робота №3 — records, pattern matching, імпорт CSV/JSON
 
- Мета: описати перші дані домену сучасним C# (`record`, nullable reference types,
- pattern matching) і завантажити їх з файлу так, щоб пошкоджені рядки не переривали
- імпорт цілісних. Логіка розбору повністю в `Core` (`Core/Dto`, `Core/Import`), `Cli`
- лише викликає імпортер і форматує вивід.
+ Дані домену описані record-типами (`Core/Dto`), розбір файлу — у `Core/Import` через
+ `switch expression` з патернами; `Cli` лише викликає імпортер і друкує результат.
 
- ### 1. Record-типи (`Core/Dto`)
+ ### Команди: build і основні сценарії
 
- ```csharp
- namespace Core.Dto;
-
- public record ProductDto(
-     string Id,
-     string Sku,
-     string Name,
-     string Unit,
-     int Quantity,
-     string? Note = null);
+ ```bash
+ dotnet build
+ dotnet run --project src/Cli -f net10.0                          # data/sample.csv за замовчуванням
+ dotnet run --project src/Cli -f net10.0 -- data/sample.csv       # той самий файл явним шляхом
+ dotnet run --project src/Cli -f net10.0 -- data/sample.json      # JSON замість CSV (додаткове завдання 1)
+ dotnet run --project src/Cli -f net10.0 -- data/no-such-file.csv # неіснуючий файл — сценарій з методички
+ dotnet run --project src/Cli -f net10.0 -- --mixed               # мішані рядки (додаткове завдання 2)
  ```
 
- `Id`, `Sku`, `Name`, `Unit`, `Quantity` — без `?`: рядок, у якому будь-яке з цих полів
- відсутнє чи порожнє, вважається пошкодженим і взагалі не потрапляє в `Items` (це
- перевіряється ще на етапі `ParseLine`, до створення `ProductDto`). `Note` — єдине
- `string?` поле зі значенням за замовчуванням `null`, бо приміток у вхідних даних
- справді часто немає, і це нормальний, а не помилковий стан.
-
- ```csharp
- namespace Core.Dto;
-
- public record WarehouseDto(
-     string Id,
-     string Name,
-     string Location);
- ```
-
- Другий тип, потрібний для додаткового завдання 2 (мішані рядки товар/склад). Усі поля
- обов'язкові — рядок про склад без адреси чи назви так само вважається пошкодженим.
-
- ```csharp
- namespace Core.Dto;
-
- public sealed record ImportResult<T>(
-     IReadOnlyList<T> Items,
-     IReadOnlyList<string> Errors);
- ```
-
- Узагальнений (generic) тип: один опис обслуговує і `ImportResult<ProductDto>`, і будь-
- який інший DTO в майбутньому. Поля оголошені як `IReadOnlyList<T>`, а не `List<T>`, щоб
- отримувач результату не міг дописати туди щось своє.
-
- **Чому тут `record`, а не `class`:** усі ці типи лише переносять уже готові дані одного
- рядка файлу — їх порівнюють за вмістом, не змінюють після створення і не мають власної
- поведінки чи життєвого циклу, а саме для цього й призначений `record`.
-
- ### 2. Розбір рядка: `switch expression` з патернами (`Core/Import/ProductCsvImporter.cs`)
-
- ```csharp
- private static ParseOutcome ParseLine(string line)
- {
-     string[] parts = line.Split(Separator, StringSplitOptions.TrimEntries);
-
-     return parts switch
-     {
-         { Length: < 5 } => new ParseFailed($"очікую 5 колонок, отримав {parts.Length}"),
-         [_, "", _, _, _] or [_, _, "", _, _]
-             => new ParseFailed("SKU або назва порожні"),
-         [_, _, _, _, var qty] when !int.TryParse(qty, out int q) || q < 0
-             => new ParseFailed($"кількість '{qty}' не є невід'ємним числом"),
-         [var id, var sku, var name, var unit, var qty]
-             => new ParseOk(new ProductDto(id, sku, name, unit, int.Parse(qty))),
-         _ => new ParseFailed($"занадто багато колонок: {parts.Length}")
-     };
- }
- ```
-
- Використані патерни (5 гілок, вимога методички — мінімум 3):
-
- | Патерн | Що перевіряє |
- | --- | --- |
- | `{ Length: < 5 }` | патерн властивості + реляційний (`<`) — замало колонок |
- | `[_, "", _, _, _] or [_, _, "", _, _]` | патерн списку + константний `""` + логічний `or` — порожній SKU або назва |
- | `[..., var qty] when !int.TryParse(...)` | патерн списку + охоронна умова `when` — нечислова/від'ємна кількість |
- | `[var id, var sku, var name, var unit, var qty]` | патерн списку рівно з 5 елементів з іменуванням |
- | `_` | гілка «усе інше» — забагато колонок |
-
- Результат розбору — власна ієрархія record-типів (`abstract record ParseOutcome` з
- `ParseOk`/`ParseFailed`), а не виняток: один битий рядок не перериває імпорт решти.
-
- ### 3. Формат файлу `data/sample.csv`
-
- - роздільник — `;` (крапка з комою, не конфліктує з комою в назвах товарів);
- - перший рядок — заголовок (`id;sku;name;unit;quantity`), розпізнається і пропускається
-   окремою перевіркою в `Load`, файл без заголовка теж читається коректно;
- - кодування — UTF-8;
- - 13 рядків: 10 коректних і 3 навмисно пошкоджені (замало колонок, нечислова кількість,
-   порожній SKU) — це тестові дані, а не недбалість.
-
- ### 4. Вивід консолі
-
- Коректний файл (`dotnet run --project src/Cli`, читає `data/sample.csv` за замовчуванням):
+ Вивід для `sample.csv` (10 коректних + 3 навмисно биті рядки — перевіряє одразу і
+ "коректний файл", і "файл з помилками"):
 
  ```text
  Завантажено записів: 10
    P-001  SKU-001    Цемент М400 25кг             120 шт
    P-002  SKU-002    Пісок будівельний             18 т
-   P-003  SKU-003    Цегла червона               4200 шт
-   P-004  SKU-004    Фарба водоемульсійна 10л      36 шт
-   P-005  SKU-005    Шпаклівка фінішна            250 кг
+   ...
  Пропущено рядків: 3
    ! рядок 12: очікую 5 колонок, отримав 4
    ! рядок 13: кількість 'багато' не є невід'ємним числом
@@ -377,86 +292,52 @@
  Усього: 13, прийнято: 10, пропущено: 3, помилок: 23.1%
  ```
 
- Неіснуючий файл (`dotnet run --project src/Cli -- data/no-such-file.csv`):
+ Неіснуючий файл: `Файл не знайдено: <повний шлях>`, код виходу `1`, без необробленого винятку.
 
- ```text
- Файл не знайдено: /Users/roman/Desktop/labs/cpp/lab1/CrossApp/data/no-such-file.csv
- ```
-
- (код виходу — `1`, без необробленого винятку).
-
- ### Додаткові завдання (лабораторна №3)
-
- #### 1. Другий імпортер — JSON
-
- `Core/Import/ProductJsonImporter.cs` читає той самий `ProductDto` з `data/sample.json`
- через `System.Text.Json`. `Cli` обирає імпортер за розширенням файлу окремим
- `switch expression`:
+ ### Record-типи (`Core/Dto`)
 
  ```csharp
- ImportResult<ProductDto> result = Path.GetExtension(path).ToLowerInvariant() switch
- {
-     ".csv" => ProductCsvImporter.Load(path),
-     ".json" => ProductJsonImporter.Load(path),
-     var ext => throw new NotSupportedException($"Непідтримуване розширення файлу: '{ext}'")
- };
+ public record ProductDto(string Id, string Sku, string Name, string Unit, int Quantity, string? Note = null);
+ public record WarehouseDto(string Id, string Name, string Location);
+ public sealed record ImportResult<T>(IReadOnlyList<T> Items, IReadOnlyList<string> Errors);
  ```
 
- ```bash
- dotnet run --project src/Cli -f net10.0 -- data/sample.json
- ```
- ```text
- Завантажено записів: 3
-   P-001  SKU-001    Цемент М400 25кг             120 шт
-   P-002  SKU-002    Пісок будівельний             18 т
-   P-003  SKU-003    Цегла червона               4200 шт
- Усього: 3, прийнято: 3, пропущено: 0, помилок: 0.0%
- ```
+ `Note` — єдине nullable поле (`string?`), бо примітка справді часто відсутня; решта
+ полів обов'язкові — без них рядок вважається пошкодженим ще на етапі `ParseLine`.
+ `record`, а не `class`, бо ці типи лише переносять готові дані рядка файлу і не мають
+ власної поведінки чи життєвого циклу.
 
- На відміну від CSV, `System.Text.Json.Deserialize` не відновлюється посторічково: файл
- або валідний увесь, або ні (тоді `catch (JsonException)` повертає одну загальну
- помилку в `Errors`, без необробленого винятку).
+ ### Патерни в `switch expression` (`ProductCsvImporter.ParseLine`)
 
- #### 2. Різнорідні рядки за префіксом типу
+ | Патерн | Що перевіряє |
+ | --- | --- |
+ | `{ Length: < 5 }` | властивість + реляційний `<` — замало колонок |
+ | `[_, "", _, _, _] or [_, _, "", _, _]` | список + константа `""` + `or` — порожній SKU/назва |
+ | `[..., var qty] when !int.TryParse(...)` | список + охоронна умова `when` — нечисла/від'ємна кількість |
+ | `[var id, var sku, var name, var unit, var qty]` | список рівно з 5 елементів з іменуванням |
+ | `_` | усе інше — забагато колонок |
 
- `data/sample_mixed.csv` містить упереміш рядки товарів (`P;...`) і складів (`W;...`).
- `Core/Import/MixedCsvImporter.cs` розпізнає обидва в одному `switch` за константним
- патерном на першій позиції списку (`["P", ...]` / `["W", ...]`), результат —
- `MixedImportResult(Products, Warehouses, Errors)`. Викликається окремо, прапорцем
- `--mixed`, щоб не змішувати з основним сценарієм:
+ Результат — record-ієрархія `ParseOutcome`/`ParseOk`/`ParseFailed`, а не виняток: один
+ битий рядок не зупиняє імпорт решти.
 
- ```bash
- dotnet run --project src/Cli -f net10.0 -- --mixed
- ```
- ```text
- Товарів: 2, складів: 2, помилок: 2
-   ! рядок 5: невідомий тип рядка 'P' або неправильна кількість колонок
-   ! рядок 6: невідомий тип рядка 'X' або неправильна кількість колонок
- ```
+ ### Формат `data/sample.csv`
 
- #### 3. Статистика імпорту одним рядком
+ роздільник `;` · перший рядок — заголовок (файл без заголовка теж читається) · UTF-8 ·
+ 13 рядків, з них 3 навмисно биті (тестові дані, не недбалість).
 
- ```csharp
- int total = result.Items.Count + result.Errors.Count;
- double errorRate = total == 0 ? 0 : (double)result.Errors.Count / total * 100;
- Console.WriteLine($"Усього: {total}, прийнято: {result.Items.Count}, " +
-     $"пропущено: {result.Errors.Count}, " +
-     $"помилок: {errorRate.ToString("F1", CultureInfo.InvariantCulture)}%");
- ```
+ ### Додаткові завдання
 
- Форматування явно через `CultureInfo.InvariantCulture` — без цього `:F1` узяв би
- поточну культуру системи і на україномовній локалі вивів би `23,1%` з комою замість
- крапки, хоча вхідні дані парсяться з тим самим `InvariantCulture` (той самий принцип,
- що й для парсингу чисел з файлу, застосований до виводу).
+ **1. JSON-імпортер** — `Core/Import/ProductJsonImporter.cs` читає той самий `ProductDto`
+ через `System.Text.Json`; `Cli` обирає імпортер за розширенням файлу своїм `switch`.
+ CSV відновлюється посторічково, JSON — ні: битий JSON дає одну спільну помилку в
+ `Errors` (`catch (JsonException)`), а не виняток назовні.
 
- ### Самоперевірка
+ **2. Мішані рядки за префіксом** — `data/sample_mixed.csv` містить `P;...` (товар) і
+ `W;...` (склад) впереміш; `MixedCsvImporter` розпізнає обидва в одному `switch` за
+ константним патерном на першій позиції списку. Команда для перевірки — вище (`--mixed`).
 
- - Records лежать у `Core/Dto`, а не в `Cli`.
- - У `Program.cs` немає жодного `Split` чи `int.Parse` — уся логіка розбору в `Core`.
- - Пошкоджений рядок дає повідомлення з номером рядка, а не падіння програми.
- - Файл із заголовком і без нього обробляються однаково коректно.
- - Числа парсяться (`int.TryParse`) і форматуються (`errorRate`) з `InvariantCulture`.
- - Запуск з неправильним шляхом дає зрозумілий текст і код виходу `1`, а не
-   `NullReferenceException`/`FileNotFoundException` назовні.
+ **3. Статистика імпорту** — рядок `Усього/прийнято/пропущено/помилок %` у `Program.cs`,
+ відсоток форматується через `errorRate.ToString("F1", CultureInfo.InvariantCulture)` —
+ без цього результат на україномовній локалі виводив би кому замість крапки (`23,1%`).
 
  
