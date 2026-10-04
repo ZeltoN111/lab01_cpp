@@ -40,9 +40,15 @@
          ImportResult.cs         (record ImportResult<T>)
          MixedImportResult.cs    (record для мішаного імпорту)
        Import/
-         ProductCsvImporter.cs   (розбір CSV через switch expression)
-         ProductJsonImporter.cs  (розбір JSON, System.Text.Json)
-         MixedCsvImporter.cs     (рядки товарів/складів за префіксом)
+         ProductCsvImporter.cs    (розбір CSV через switch expression)
+         ProductJsonImporter.cs   (розбір JSON, System.Text.Json)
+         MixedCsvImporter.cs      (рядки товарів/складів за префіксом)
+         ProductDomainImporter.cs (ImportResult<ProductDto> → ImportResult<Product>)
+       Domain/
+         Product.cs               (сутність: приватний стан, фабрика, інваріанти)
+         Warehouse.cs              (сутність: місткість складу)
+         ProductStatus.cs          (enum: Active / Discontinued / Archived)
+         WarehouseCapacityPolicy.cs (інваріант на дві сутності)
      Cli/
        Cli.csproj                (ProjectReference на Core; multi-targeting: net10.0;net8.0)
        Program.cs
@@ -340,4 +346,151 @@
  відсоток форматується через `errorRate.ToString("F1", CultureInfo.InvariantCulture)` —
  без цього результат на україномовній локалі виводив би кому замість крапки (`23,1%`).
 
+ ## Лабораторна робота №4 — доменна модель: сутності, інваріанти, інкапсуляція
+
+ ### Обрані сутності і зв'язок між ними
+
+ Головна сутність — `Product` (товар зі залишком, `Core/Domain/Product.cs`), пов'язана
+ сутність — `Warehouse` (склад з місткістю, `Core/Domain/Warehouse.cs`). Прямого
+ посилання одна на одну сутності не мають (`Product` нічого не знає про `Warehouse`
+ і навпаки) — зв'язок встановлюється лише там, де він дійсно потрібен: у перевірці
+ `WarehouseCapacityPolicy`, яка приймає обидві сутності ззовні (детальніше нижче).
+
+ DTO-типи тижня 3 (`ProductDto`, `WarehouseDto`) лишились без змін — це формат файлу,
+ а не модель. Зв'язок сутність ↔ DTO — методи `ToDto()` / `static FromDto(dto)` в обох
+ класах; `FromDto` завжди йде через фабричний `Create(...)`, тобто проходить ті самі
+ перевірки, що й створення "з нуля".
+
+ ### Таблиця інваріантів
+
+ | # | Правило | Тип винятку | Де перевіряється |
+ | --- | --- | --- | --- |
+ | 1 | `Id` товару обов'язковий | `ArgumentException` | `Product.Create` |
+ | 2 | `Sku` не порожній | `ArgumentException` | `Product.Create` |
+ | 3 | Назва товару не порожня | `ArgumentException` | `Product.Create` |
+ | 4 | Одиниця виміру не порожня | `ArgumentException` | `Product.Create` |
+ | 5 | Початковий залишок не від'ємний | `ArgumentOutOfRangeException` | `Product.Create` |
+ | 6 | Кількість приходу > 0 | `ArgumentOutOfRangeException` | `Product.RegisterArrival` |
+ | 7 | Кількість видачі > 0 | `ArgumentOutOfRangeException` | `Product.Issue` |
+ | 8 | Видача не більша за поточний залишок | `InvalidOperationException` | `Product.Issue` |
+ | 9 | Перехід статусу лише за дозволеною схемою (`Active ⇄ Discontinued → Archived`) | `InvalidOperationException` | `Product.ChangeStatus` |
+ | 10 | `Id` / назва / розташування складу обов'язкові | `ArgumentException` | `Warehouse.Create` |
+ | 11 | Місткість складу (`Capacity`) > 0 | `ArgumentOutOfRangeException` | `Warehouse.Create` |
+ | 12 | Прихід не повинен перевищити місткість складу (інваріант на дві сутності) | `InvalidOperationException` | `WarehouseCapacityPolicy.EnsureCanAcceptArrival` |
+
+ ### Фабричний метод і метод зміни стану
+
+ ```csharp
+ // Єдиний спосіб створити товар: усі перевірки тут, перед створенням об'єкта.
+ public static Product Create(string id, string sku, string name, string unit, int quantity, string? note = null)
+ {
+     if (string.IsNullOrWhiteSpace(id))
+         throw new ArgumentException("Ідентифікатор обов'язковий", nameof(id));
+     if (string.IsNullOrWhiteSpace(sku))
+         throw new ArgumentException("SKU не може бути порожнім", nameof(sku));
+     if (quantity < 0)
+         throw new ArgumentOutOfRangeException(nameof(quantity), quantity,
+             "Початковий залишок не може бути від'ємним");
+
+     return new Product(id.Trim(), sku.Trim().ToUpperInvariant(), name.Trim(), unit.Trim(), quantity, note);
+ }
+
+ public void Issue(int amount)
+ {
+     if (amount <= 0)
+         throw new ArgumentOutOfRangeException(nameof(amount), amount,
+             "Кількість видачі має бути більшою за нуль");
+     if (amount > _quantity)
+         throw new InvalidOperationException(
+             $"Не можна видати {amount}: залишок {Sku} = {_quantity}");
+
+     _quantity -= amount;
+ }
+ ```
+
+ Перевірка завжди виконується **до** зміни стану: якщо виняток злетів, `_quantity`
+ лишається попереднім значенням — об'єкт ніколи не буває напівзміненим.
+
+ ### Вивід консолі (обидва сценарії)
+
+ ```text
+ === Імпорт CSV → DTO → домен (зв'язок з тижнем 3) ===
+ Успішно створено сутностей: 10
+ Відхилено (помилка парсингу або порушення інваріанту): 4
+   ! рядок 12: очікую 5 колонок, отримав 4
+   ! рядок 13: кількість 'багато' не є невід'ємним числом
+   ! рядок 14: SKU або назва порожні
+   ! SKU-014 (id=): Ідентифікатор обов'язковий (Parameter 'id')
+
+ === Сценарій 1: успіх ===
+ P-001 [SKU-001] Цемент М400 25кг — 100 шт
+ P-001 [SKU-001] Цемент М400 25кг — 150 шт
+ P-001 [SKU-001] Цемент М400 25кг — 120 шт
+ Статус товару SKU-001: Discontinued
+ W-001 Головний склад (Львів, вул. Промислова 1)
+ Прихід 50 од. на склад W-001 (було 120, місткість 200) — дозволено
+
+ === Сценарій 2: порушення інваріантів ===
+   видача більша за залишок: InvalidOperationException — Не можна видати 1000: залишок SKU-001 = 120
+   порожній SKU: ArgumentException — SKU не може бути порожнім (Parameter 'sku')
+   від'ємний залишок: ArgumentOutOfRangeException — Початковий залишок не може бути від'ємним (Parameter 'quantity')
+   нульова видача: ArgumentOutOfRangeException — Кількість видачі має бути більшою за нуль (Parameter 'amount')
+   порожня назва складу: ArgumentException — Назва складу не може бути порожньою (Parameter 'name')
+   недопустимий перехід статусу (Active → Archived напряму): InvalidOperationException — Товар SKU-004: перехід зі стану Active у Archived неможливий
+   повторний перехід у той самий стан (Discontinued → Discontinued): InvalidOperationException — Товар SKU-001: перехід зі стану Discontinued у Discontinued неможливий
+   прихід, що перевищує місткість складу: InvalidOperationException — Склад W-001 не вмістить прихід: місткість 200, поточний залишок 180, після приходу було б 230
+
+ Підсумковий залишок SKU-001: 120 шт (не змінився після відмов)
+ ```
+
+ Рядок `SKU-014 (id=): Ідентифікатор обов'язковий` у першому блоці — рядок 15 з
+ `data/sample.csv` із порожнім `id`. CSV-парсер (тиждень 3) перевіряє лише SKU й
+ назву, тому цей рядок успішно проходить парсинг — і лише доменна перевірка
+ (`Product.Create`) відхиляє його. Наочна різниця між "файл синтаксично читається" і
+ "дані семантично коректні".
+
+ ### DTO vs сутність — чому не один тип
+
+ `ProductDto`/`WarehouseDto` (тиждень 3) — `record`, що лише переносить дані рядка
+ файлу: будь-яке значення (навіть від'ємна кількість чи порожній SKU) можна покласти
+ в DTO без жодної перевірки — це сире, ще не підтверджене уявлення про товар.
+ `Product`/`Warehouse` (тиждень 4) — `class` з приватним станом і фабрикою: гарантує,
+ що об'єкт або коректний, або не існує взагалі. Один тип на обидві задачі означав би
+ або DTO з перевірками (і тоді незрозуміло, навіщо взагалі окремий формат для файлу),
+ або сутність, що читається напряму з файлу (і тоді кожне нове джерело даних —
+ CSV, JSON, Api-запит — довелось би окремо захищати від некоректних значень).
+ Розділення дає одну точку правди про коректність (`Product.Create`) незалежно від
+ того, звідки дані прийшли.
+
+ ### Додаткові завдання
+
+ **1. Зв'язок з тижнем 3** — `Core/Import/ProductDomainImporter.ToDomain(ImportResult<ProductDto>)`
+ перетворює вже розібрані DTO на сутності через `FromDto`, об'єднуючи в одному
+ `ImportResult<Product>` і помилки парсингу (тиждень 3), і помилки доменних
+ інваріантів (тиждень 4) — та сама ідея "дані + помилки", тепер у два рівні.
+
+ **2. Інваріант на дві сутності** — `Core/Domain/WarehouseCapacityPolicy.EnsureCanAcceptArrival`
+ перевіряє, що прихід не перевищить місткість складу, з огляду на сумарний залишок
+ усіх товарів на ньому. Це навмисно **не метод** `Product` чи `Warehouse`: жодна з
+ двох сутностей одноосібно не володіє сумарним залишком по складу (це колекція, якою
+ на 5-му тижні керуватиме сховище/сервіс), а `Product` і `Warehouse` не повинні мати
+ прямих посилань одне на одного. Тому перевірка — окремий клас, прообраз майбутнього
+ `CatalogService`.
+
+ **3. Явний стан і переходи** — `Core/Domain/ProductStatus.cs` (`enum Active,
+ Discontinued, Archived`) і `Product.ChangeStatus(ProductStatus)`, який звіряє пару
+ "поточний → новий стан" через `switch`-вираз з tuple-патерном:
+
+ ```csharp
+ bool allowed = (Status, newStatus) switch
+ {
+     (ProductStatus.Active, ProductStatus.Discontinued) => true,
+     (ProductStatus.Discontinued, ProductStatus.Active) => true,
+     (ProductStatus.Discontinued, ProductStatus.Archived) => true,
+     _ => false
+ };
+ ```
+
+ `Archived` — термінальний стан (виходу з нього немає); перехід `Active → Archived`
+ напряму заборонений — спершу товар має стати `Discontinued`.
  

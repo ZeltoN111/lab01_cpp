@@ -53,7 +53,7 @@ public static class MixedCsvImporter
                 => new WarehouseRow(new WarehouseDto(id, name, location)),
 
             [var prefix, ..]
-                => new FailedRow($"невідомий тип рядка '{prefix}' або неправильна кількість колонок"),
+                => new FailedRow($"невідомий тип рядка '{prefix}', неправильна кількість колонок або формат"),
 
             _ => new FailedRow("порожній або нерозпізнаний рядок")
         };
