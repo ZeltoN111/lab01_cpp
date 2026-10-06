@@ -11,15 +11,16 @@ namespace Core.Domain;
 //   тижня 5), тому "сумарний залишок по складу" — дані, якими жодна окрема
 //   сутність одноосібно не володіє.
 // Тому перевірка живе окремо, як майбутній прообраз CatalogService: приймає обидві
-// сутності ззовні та агреговане значення (яке на 5-му тижні порахує сховище).
+// сутності ззовні (Warehouse і товари, що лежать на ньому) і сама рахує суму залишків.
 public static class WarehouseCapacityPolicy
 {
-    public static void EnsureCanAcceptArrival(Warehouse warehouse, int currentTotalQuantity, int incomingAmount)
+    public static void EnsureCanAcceptArrival(Warehouse warehouse, IEnumerable<Product> productsOnWarehouse, int incomingAmount)
     {
         if (incomingAmount <= 0)
             throw new ArgumentOutOfRangeException(nameof(incomingAmount), incomingAmount,
                 "Кількість приходу має бути більшою за нуль");
 
+        int currentTotalQuantity = productsOnWarehouse.Sum(p => p.Quantity);
         int projected = currentTotalQuantity + incomingAmount;
         if (projected > warehouse.Capacity)
             throw new InvalidOperationException(

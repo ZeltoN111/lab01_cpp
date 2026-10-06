@@ -23,6 +23,7 @@ public sealed class Product
         Note = note;
         _quantity = quantity;
     }
+    
 
     // Єдиний спосіб створити товар: усі перевірки тут, перед створенням об'єкта.
     public static Product Create(string id, string sku, string name, string unit, int quantity, string? note = null)
@@ -89,3 +90,5 @@ public sealed class Product
 
     public override string ToString() => $"{Id} [{Sku}] {Name} — {Quantity} {Unit}";
 }
+
+
