@@ -1,23 +1,7 @@
  # CrossApp
 
- Наскрізний проєкт з крос-платформного програмування на .NET.
-
- ## Предметна область
-
- **Склад**: облік залишків товарів по партіях.
-
- Основні сутності:
-
- - `Product` — товар;
- - `StockBatch` — партія товару;
- - `Warehouse` — склад;
- - `Movement` — переміщення.
-
- ## Середовище
-
- - .NET SDK `10.0.11`;
- - macOS `26.6.2`;
- - архітектура `arm64`.
+ Наскрізний проєкт з крос-платформного програмування на .NET. Домен: **Склад** —
+ облік залишків товарів по партіях.
 
  ## Структура solution
 
@@ -25,472 +9,86 @@
  CrossApp/
    CrossApp.slnx
    README.md
-   .gitignore
    data/
-     sample.csv                  (10+ рядків, 3 навмисно пошкоджені)
-     sample.json                 (той самий домен у форматі JSON)
-     sample_mixed.csv             (рядки товарів і складів впереміш, з префіксом P;/W;)
+     sample.csv / sample.json / sample_mixed.csv   (тестові дані для імпорту)
    src/
      Core/
        Core.csproj              (multi-targeting: net8.0;net10.0)
-       EnvironmentInfo.cs        (namespace Core)
-       Dto/
-         ProductDto.cs           (record, namespace Core.Dto)
-         WarehouseDto.cs         (record, namespace Core.Dto)
-         ImportResult.cs         (record ImportResult<T>)
-         MixedImportResult.cs    (record для мішаного імпорту)
-       Import/
-         ProductCsvImporter.cs    (розбір CSV через switch expression)
-         ProductJsonImporter.cs   (розбір JSON, System.Text.Json)
-         MixedCsvImporter.cs      (рядки товарів/складів за префіксом)
-         ProductDomainImporter.cs (ImportResult<ProductDto> → ImportResult<Product>)
-       Domain/
-         Product.cs               (сутність: приватний стан, фабрика, інваріанти)
-         Warehouse.cs              (сутність: місткість складу)
-         ProductStatus.cs          (enum: Active / Discontinued / Archived)
-         WarehouseCapacityPolicy.cs (інваріант на дві сутності)
+       EnvironmentInfo.cs        (інформація про середовище виконання)
+       Dto/                      (record-и — формат файлу: ProductDto, WarehouseDto, ImportResult<T>)
+       Import/                   (парсинг CSV/JSON, міст Import → Domain)
+       Domain/                   (НОВЕ, лаба 4: сутності з поведінкою — Product, Warehouse)
      Cli/
-       Cli.csproj                (ProjectReference на Core; multi-targeting: net10.0;net8.0)
+       Cli.csproj                (ProjectReference на Core; multi-targeting)
        Program.cs
  ```
 
- `Core` — class library без точки входу: збирає інформацію про середовище і повертає її
- у вигляді запису (`record`), нічого не друкує. `Cli` — консольний застосунок з `Main`
- (top-level statements), який лише форматує та виводить те, що дав `Core`.
- Залежність напрямлена в один бік: `Cli` → `Core`. `Core` про `Cli` нічого не знає.
+ `Core` — class library без точки входу. `Cli` — консольний застосунок, залежність
+ лише в один бік: `Cli → Core`.
 
- ## Команди: додавання Core і посилання
-
- Виконано одноразово при створенні `Core`:
-
- ```bash
- dotnet new classlib -n Core -o src/Core -f net10.0
- dotnet sln add src/Core/Core.csproj
- dotnet add src/Cli/Cli.csproj reference src/Core/Core.csproj
- rm src/Core/Class1.cs
- ```
-
- Перевірка, що посилання з'явилося:
-
- ```bash
- cat src/Cli/Cli.csproj
- # має бути: <ProjectReference Include="..\Core\Core.csproj" />
- ```
-
- ## Build / Run
+ ## Команди
 
  ```bash
  dotnet build
- dotnet run --project src/Cli
- ```
-
- ## Публікація: self-contained vs framework-dependent
-
- Кожен варіант — в окрему папку `-o`, щоб не перезаписувати попередній результат:
-
- ```bash
- # self-contained
- dotnet publish src/Cli -c Release -f net10.0 -r osx-arm64 --self-contained true  -o publish/osx-arm64-sc
- dotnet publish src/Cli -c Release -f net10.0 -r win-x64    --self-contained true  -o publish/win-x64-sc
-
- # framework-dependent
- dotnet publish src/Cli -c Release -f net10.0 -r win-x64    --self-contained false -o publish/win-x64-fd
- ```
-
- > Прапорець `-f net10.0` обов'язковий, бо `Cli.csproj` тепер multi-target
- > (`net10.0;net8.0`) — без нього `dotnet publish` падає з помилкою
- > `NETSDK1129: ... must specify one of the following frameworks`.
-
- Запуск опублікованого застосунку напряму (не через `dotnet run`):
-
- ```bash
- cd publish/osx-arm64-sc
- chmod +x Cli
- ./Cli
- cd ../..
- ```
-
- Windows-публікація містить `Cli.exe` замість `Cli` і виконується лише на Windows —
- бінарник під один RID не запускається на іншій ОС (це не помилка, а очікувана поведінка).
-
- ### Порівняння режимів публікації
-
- | RID | Режим | Розмір публікації | Потрібен встановлений runtime |
- | --- | --- | ---: | :---: |
- | `osx-arm64` | self-contained | ~83 МБ | ні |
- | `win-x64` | self-contained | ~77 МБ | ні |
- | `win-x64` | framework-dependent | ~208 КБ | так (.NET 10 Runtime) |
-
- Self-contained публікація включає весь .NET runtime і всі системні збірки, тому важить
- десятки мегабайт незалежно від розміру власного коду. Framework-dependent публікація
- містить лише код застосунку (`Cli.dll`, `Core.dll` і конфіг) і покладається на те, що на
- цільовій машині вже встановлено відповідний .NET Runtime — тому важить кілобайти.
-
- ## Multi-targeting
-
- І `Core.csproj`, і `Cli.csproj` збираються одразу для двох TFM:
-
- ```xml
- <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
- ```
-
- Після `dotnet build` у `bin/Debug/` з'являються окремі підкаталоги `net8.0/` і
- `net10.0/`, кожен зі своєю збіркою. Умовна компіляція показана в
- `src/Core/EnvironmentInfo.cs`:
-
- ```csharp
- #if NET10_0_OR_GREATER
-     private const string BuildNote = "збірка під net10.0";
- #else
-     private const string BuildNote = "збірка під net8.0";
- #endif
- ```
-
- Різницю видно у виводі при запуску під різними TFM:
-
- ```bash
  dotnet run --project src/Cli -f net10.0
- dotnet run --project src/Cli -f net8.0
  ```
 
- net10.0:
- ```text
- ОС             : macOS 26.6.2
- Runtime        : .NET 10.0.11
- Каталог        : .../src/Cli/bin/Debug/net10.0/
- Збірка         : збірка під net10.0
- ```
-
- net8.0:
- ```text
- ОС             : Darwin 25.6.0 Darwin Kernel Version 25.6.0: ...; root:xnu-12377.161.14~5/RELEASE_ARM64_T8103
- Runtime        : .NET 8.0.31
- Каталог        : .../src/Cli/bin/Debug/net8.0/
- Збірка         : збірка під net8.0
- ```
-
- Різні `Runtime`, різний (детальніший) формат `OsDescription` під net8.0 і різний
- `BuildNote` — усе це резолвиться компілятором окремо для кожного TFM ще на етапі
- збірки, без жодного `if` під час виконання.
-
- ## Приклад локального запуску (`dotnet run`)
-
- ```text
- CrossApp – інформація про середовище
- ----------------------------------------------------
- ОС             : macOS 26.6.2
- Runtime        : .NET 10.0.11
- Архітектура    : Arm64
- RID (визначено): osx-arm64
- RID (від .NET) : osx-arm64
- Каталог        : /Users/roman/Desktop/labs/cpp/lab1/CrossApp/src/Cli/bin/Debug/net10.0/
- Збірка         : збірка під net10.0
- ```
-
- ## Приклад запуску з каталогу publish (`./Cli`, self-contained osx-arm64)
-
- ```text
- CrossApp – інформація про середовище
- ----------------------------------------------------
- ОС             : macOS 26.6.2
- Runtime        : .NET 10.0.11
- Архітектура    : Arm64
- RID (визначено): osx-arm64
- RID (від .NET) : osx-arm64
- Каталог        : /Users/roman/Desktop/labs/cpp/lab1/CrossApp/publish/osx-arm64-sc/
- Збірка         : збірка під net10.0
- ```
-
- Вивід ідентичний виводу `dotnet run` за змістом — відрізняється лише `Каталог`, бо
- застосунок запущено з іншого місця на диску.
-
- ## Додаткові завдання
-
- ### 1. Self-contained publish під два RID
-
- Публікація виконана під дві різні платформи (див. таблицю вище):
+ Публікація (self-contained включає .NET runtime, framework-dependent — ні):
 
  ```bash
- dotnet publish src/Cli -c Release -f net10.0 -r osx-arm64 --self-contained true -o publish/osx-arm64-sc
- dotnet publish src/Cli -c Release -f net10.0 -r win-x64 --self-contained true -o publish/win-x64-sc
+ dotnet publish src/Cli -c Release -f net10.0 -r osx-arm64 --self-contained true  -o publish/sc
+ dotnet publish src/Cli -c Release -f net10.0 -r osx-arm64 --self-contained false -o publish/fd
  ```
 
- Розмір включає весь .NET runtime, тому обидва каталоги значно більші за
- framework-dependent збірку (~208 КБ).
+ | Режим | Розмір | Потрібен runtime |
+ | --- | ---: | :---: |
+ | self-contained | ~83 МБ | ні |
+ | framework-dependent | ~0.2 МБ | так (.NET 10) |
 
- ### 2. `PublishSingleFile=true`
+ ## Попередні лабораторні (коротко)
 
- ```bash
- dotnet publish src/Cli -c Release -f net10.0 -r osx-arm64 --self-contained true \
-   -p:PublishSingleFile=true -o publish/osx-arm64-singlefile
- ```
-
- | Варіант | Файлів у каталозі | Розмір | Запускається |
- | --- | ---: | ---: | :---: |
- | self-contained (звичайний) | 193 | 83 МБ | так |
- | self-contained + `PublishSingleFile` | 3 | 76 МБ | так |
-
- Кількість файлів впала з 193 до 3 (виконуваний `Cli`, `.pdb` і конфіг) — усі
- `System.*.dll` запаковані всередину одного бінарника. Розмір при цьому суттєво **не**
- зменшився (76 МБ проти 83 МБ) — увесь runtime і так входив до self-contained публікації,
- single file лише змінює спосіб пакування, а не прибирає код. Запускається так само, як
- і звичайний self-contained (`./Cli`), вивід ідентичний.
-
- ### 3. `PublishTrimmed=true`
-
- ```bash
- dotnet publish src/Cli -c Release -f net10.0 -r osx-arm64 --self-contained true \
-   -p:PublishTrimmed=true -o publish/osx-arm64-trimmed
- ```
-
- | Варіант | Розмір | Попередження збірки |
- | --- | ---: | --- |
- | self-contained (без trim) | 83 МБ | — |
- | self-contained + `PublishTrimmed` | 20 МБ | 0 (жодних `warning IL2xxx`) |
-
- Розмір впав з 83 МБ до 20 МБ — trimmer прибрав усі невикористані частини .NET runtime
- (наприклад `System.Data`, `System.Net.Http` тощо, які код застосунку не викликає).
- Попереджень немає, тому що в `EnvironmentInfo`/`Program.cs` немає рефлексії — увесь
- виклик статичний (`RuntimeInformation.*`, звичайні поля record).
-
- ### 4. Multi-targeting з різним виводом на TFM
-
- Див. секцію [Multi-targeting](#multi-targeting) вище — `BuildNote` через `#if
- NET10_0_OR_GREATER`, показано реальний вивід під net10.0 і net8.0.
-
- ### 5. Запуск у Docker-контейнері
-
- Спочатку запустіть Docker Desktop. Потім виконайте команду з кореня проєкту:
-
- ```bash
- docker run --rm -v ${PWD}:/src -w /src mcr.microsoft.com/dotnet/sdk:10.0 \
-   dotnet run --project src/Cli
- ```
-
- ## Лабораторна робота №3 — records, pattern matching, імпорт CSV/JSON
-
- Дані домену описані record-типами (`Core/Dto`), розбір файлу — у `Core/Import` через
- `switch expression` з патернами; `Cli` лише викликає імпортер і друкує результат.
-
- ### Команди: build і основні сценарії
-
- ```bash
- dotnet build
- dotnet run --project src/Cli -f net10.0                          # data/sample.csv за замовчуванням
- dotnet run --project src/Cli -f net10.0 -- data/sample.csv       # той самий файл явним шляхом
- dotnet run --project src/Cli -f net10.0 -- data/sample.json      # JSON замість CSV (додаткове завдання 1)
- dotnet run --project src/Cli -f net10.0 -- data/no-such-file.csv # неіснуючий файл — сценарій з методички
- dotnet run --project src/Cli -f net10.0 -- --mixed               # мішані рядки (додаткове завдання 2)
- ```
-
- Вивід для `sample.csv` (10 коректних + 3 навмисно биті рядки — перевіряє одразу і
- "коректний файл", і "файл з помилками"):
-
- ```text
- Завантажено записів: 10
-   P-001  SKU-001    Цемент М400 25кг             120 шт
-   P-002  SKU-002    Пісок будівельний             18 т
-   ...
- Пропущено рядків: 3
-   ! рядок 12: очікую 5 колонок, отримав 4
-   ! рядок 13: кількість 'багато' не є невід'ємним числом
-   ! рядок 14: SKU або назва порожні
- Усього: 13, прийнято: 10, пропущено: 3, помилок: 23.1%
- ```
-
- Неіснуючий файл: `Файл не знайдено: <повний шлях>`, код виходу `1`, без необробленого винятку.
-
- ### Record-типи (`Core/Dto`)
-
- ```csharp
- public record ProductDto(string Id, string Sku, string Name, string Unit, int Quantity, string? Note = null);
- public record WarehouseDto(string Id, string Name, string Location);
- public sealed record ImportResult<T>(IReadOnlyList<T> Items, IReadOnlyList<string> Errors);
- ```
-
- `Note` — єдине nullable поле (`string?`), бо примітка справді часто відсутня; решта
- полів обов'язкові — без них рядок вважається пошкодженим ще на етапі `ParseLine`.
- `record`, а не `class`, бо ці типи лише переносять готові дані рядка файлу і не мають
- власної поведінки чи життєвого циклу.
-
- ### Патерни в `switch expression` (`ProductCsvImporter.ParseLine`)
-
- | Патерн | Що перевіряє |
- | --- | --- |
- | `{ Length: < 5 }` | властивість + реляційний `<` — замало колонок |
- | `[_, "", _, _, _] or [_, _, "", _, _]` | список + константа `""` + `or` — порожній SKU/назва |
- | `[..., var qty] when !int.TryParse(...)` | список + охоронна умова `when` — нечисла/від'ємна кількість |
- | `[var id, var sku, var name, var unit, var qty]` | список рівно з 5 елементів з іменуванням |
- | `_` | усе інше — забагато колонок |
-
- Результат — record-ієрархія `ParseOutcome`/`ParseOk`/`ParseFailed`, а не виняток: один
- битий рядок не зупиняє імпорт решти.
-
- ### Формат `data/sample.csv`
-
- роздільник `;` · перший рядок — заголовок (файл без заголовка теж читається) · UTF-8 ·
- 13 рядків, з них 3 навмисно биті (тестові дані, не недбалість).
-
- ### Додаткові завдання
-
- **1. JSON-імпортер** — `Core/Import/ProductJsonImporter.cs` читає той самий `ProductDto`
- через `System.Text.Json`; `Cli` обирає імпортер за розширенням файлу своїм `switch`.
- CSV відновлюється посторічково, JSON — ні: битий JSON дає одну спільну помилку в
- `Errors` (`catch (JsonException)`), а не виняток назовні.
-
- **2. Мішані рядки за префіксом** — `data/sample_mixed.csv` містить `P;...` (товар) і
- `W;...` (склад) впереміш; `MixedCsvImporter` розпізнає обидва в одному `switch` за
- константним патерном на першій позиції списку. Команда для перевірки — вище (`--mixed`).
-
- **3. Статистика імпорту** — рядок `Усього/прийнято/пропущено/помилок %` у `Program.cs`,
- відсоток форматується через `errorRate.ToString("F1", CultureInfo.InvariantCulture)` —
- без цього результат на україномовній локалі виводив би кому замість крапки (`23,1%`).
+ - **Лаба 1–2**: розділення `Core`/`Cli`, `ProjectReference`, multi-targeting
+   (`net8.0;net10.0`), публікація self-contained/framework-dependent, `PublishSingleFile`/
+   `PublishTrimmed`.
+ - **Лаба 3**: record-и домену (`ProductDto`, `WarehouseDto`, `ImportResult<T>`) у
+   `Core/Dto`; розбір `CSV`/`JSON` через `switch expression` і pattern matching у
+   `Core/Import`. Додаткові завдання: JSON-імпортер, розпізнавання мішаних рядків
+   товар/склад за префіксом, статистика імпорту з `CultureInfo.InvariantCulture`.
 
  ## Лабораторна робота №4 — доменна модель: сутності, інваріанти, інкапсуляція
 
- ### Обрані сутності і зв'язок між ними
+ У `Core/Domain` з'явились сутності з власною поведінкою (на відміну від DTO тижня 3,
+ які лишаються лише форматом файлу): **`Product`** (товар із залишком, операції
+ прихід/видача, статус) і **`Warehouse`** (склад із місткістю). Стан інкапсульований
+ (приватне поле/`private set`), створення — лише через фабричний метод `Create`
+ (конструктор приватний), `ToDto`/`FromDto` — симетричний міст до DTO тижня 3
+ (`FromDto` завжди йде через `Create`, тобто проходить ті самі перевірки).
 
- Головна сутність — `Product` (товар зі залишком, `Core/Domain/Product.cs`), пов'язана
- сутність — `Warehouse` (склад з місткістю, `Core/Domain/Warehouse.cs`). Прямого
- посилання одна на одну сутності не мають (`Product` нічого не знає про `Warehouse`
- і навпаки) — зв'язок встановлюється лише там, де він дійсно потрібен: у перевірці
- `WarehouseCapacityPolicy`, яка приймає обидві сутності ззовні (детальніше нижче).
+ ### Перелік інваріантів
 
- DTO-типи тижня 3 (`ProductDto`, `WarehouseDto`) лишились без змін — це формат файлу,
- а не модель. Зв'язок сутність ↔ DTO — методи `ToDto()` / `static FromDto(dto)` в обох
- класах; `FromDto` завжди йде через фабричний `Create(...)`, тобто проходить ті самі
- перевірки, що й створення "з нуля".
-
- ### Таблиця інваріантів
-
- | # | Правило | Тип винятку | Де перевіряється |
- | --- | --- | --- | --- |
- | 1 | `Id` товару обов'язковий | `ArgumentException` | `Product.Create` |
- | 2 | `Sku` не порожній | `ArgumentException` | `Product.Create` |
- | 3 | Назва товару не порожня | `ArgumentException` | `Product.Create` |
- | 4 | Одиниця виміру не порожня | `ArgumentException` | `Product.Create` |
- | 5 | Початковий залишок не від'ємний | `ArgumentOutOfRangeException` | `Product.Create` |
- | 6 | Кількість приходу > 0 | `ArgumentOutOfRangeException` | `Product.RegisterArrival` |
- | 7 | Кількість видачі > 0 | `ArgumentOutOfRangeException` | `Product.Issue` |
- | 8 | Видача не більша за поточний залишок | `InvalidOperationException` | `Product.Issue` |
- | 9 | Перехід статусу лише за дозволеною схемою (`Active ⇄ Discontinued → Archived`) | `InvalidOperationException` | `Product.ChangeStatus` |
- | 10 | `Id` / назва / розташування складу обов'язкові | `ArgumentException` | `Warehouse.Create` |
- | 11 | Місткість складу (`Capacity`) > 0 | `ArgumentOutOfRangeException` | `Warehouse.Create` |
- | 12 | Прихід не повинен перевищити місткість складу (інваріант на дві сутності) | `InvalidOperationException` | `WarehouseCapacityPolicy.EnsureCanAcceptArrival` |
-
- ### Фабричний метод і метод зміни стану
-
- ```csharp
- // Єдиний спосіб створити товар: усі перевірки тут, перед створенням об'єкта.
- public static Product Create(string id, string sku, string name, string unit, int quantity, string? note = null)
- {
-     if (string.IsNullOrWhiteSpace(id))
-         throw new ArgumentException("Ідентифікатор обов'язковий", nameof(id));
-     if (string.IsNullOrWhiteSpace(sku))
-         throw new ArgumentException("SKU не може бути порожнім", nameof(sku));
-     if (quantity < 0)
-         throw new ArgumentOutOfRangeException(nameof(quantity), quantity,
-             "Початковий залишок не може бути від'ємним");
-
-     return new Product(id.Trim(), sku.Trim().ToUpperInvariant(), name.Trim(), unit.Trim(), quantity, note);
- }
-
- public void Issue(int amount)
- {
-     if (amount <= 0)
-         throw new ArgumentOutOfRangeException(nameof(amount), amount,
-             "Кількість видачі має бути більшою за нуль");
-     if (amount > _quantity)
-         throw new InvalidOperationException(
-             $"Не можна видати {amount}: залишок {Sku} = {_quantity}");
-
-     _quantity -= amount;
- }
- ```
-
- Перевірка завжди виконується **до** зміни стану: якщо виняток злетів, `_quantity`
- лишається попереднім значенням — об'єкт ніколи не буває напівзміненим.
-
- ### Вивід консолі (обидва сценарії)
-
- ```text
- === Імпорт CSV → DTO → домен (зв'язок з тижнем 3) ===
- Успішно створено сутностей: 10
- Відхилено (помилка парсингу або порушення інваріанту): 4
-   ! рядок 12: очікую 5 колонок, отримав 4
-   ! рядок 13: кількість 'багато' не є невід'ємним числом
-   ! рядок 14: SKU або назва порожні
-   ! SKU-014 (id=): Ідентифікатор обов'язковий (Parameter 'id')
-
- === Сценарій 1: успіх ===
- P-001 [SKU-001] Цемент М400 25кг — 100 шт
- P-001 [SKU-001] Цемент М400 25кг — 150 шт
- P-001 [SKU-001] Цемент М400 25кг — 120 шт
- Статус товару SKU-001: Discontinued
- W-001 Головний склад (Львів, вул. Промислова 1)
- Прихід 50 од. на склад W-001 (було 120, місткість 200) — дозволено
-
- === Сценарій 2: порушення інваріантів ===
-   видача більша за залишок: InvalidOperationException — Не можна видати 1000: залишок SKU-001 = 120
-   порожній SKU: ArgumentException — SKU не може бути порожнім (Parameter 'sku')
-   від'ємний залишок: ArgumentOutOfRangeException — Початковий залишок не може бути від'ємним (Parameter 'quantity')
-   нульова видача: ArgumentOutOfRangeException — Кількість видачі має бути більшою за нуль (Parameter 'amount')
-   порожня назва складу: ArgumentException — Назва складу не може бути порожньою (Parameter 'name')
-   недопустимий перехід статусу (Active → Archived напряму): InvalidOperationException — Товар SKU-004: перехід зі стану Active у Archived неможливий
-   повторний перехід у той самий стан (Discontinued → Discontinued): InvalidOperationException — Товар SKU-001: перехід зі стану Discontinued у Discontinued неможливий
-   прихід, що перевищує місткість складу: InvalidOperationException — Склад W-001 не вмістить прихід: місткість 200, поточний залишок 180, після приходу було б 230
-
- Підсумковий залишок SKU-001: 120 шт (не змінився після відмов)
- ```
-
- Рядок `SKU-014 (id=): Ідентифікатор обов'язковий` у першому блоці — рядок 15 з
- `data/sample.csv` із порожнім `id`. CSV-парсер (тиждень 3) перевіряє лише SKU й
- назву, тому цей рядок успішно проходить парсинг — і лише доменна перевірка
- (`Product.Create`) відхиляє його. Наочна різниця між "файл синтаксично читається" і
- "дані семантично коректні".
-
- ### DTO vs сутність — чому не один тип
-
- `ProductDto`/`WarehouseDto` (тиждень 3) — `record`, що лише переносить дані рядка
- файлу: будь-яке значення (навіть від'ємна кількість чи порожній SKU) можна покласти
- в DTO без жодної перевірки — це сире, ще не підтверджене уявлення про товар.
- `Product`/`Warehouse` (тиждень 4) — `class` з приватним станом і фабрикою: гарантує,
- що об'єкт або коректний, або не існує взагалі. Один тип на обидві задачі означав би
- або DTO з перевірками (і тоді незрозуміло, навіщо взагалі окремий формат для файлу),
- або сутність, що читається напряму з файлу (і тоді кожне нове джерело даних —
- CSV, JSON, Api-запит — довелось би окремо захищати від некоректних значень).
- Розділення дає одну точку правди про коректність (`Product.Create`) незалежно від
- того, звідки дані прийшли.
+ 1. `Id` товару обов'язковий — `ArgumentException` (`Product.Create`)
+ 2. `Sku` не порожній — `ArgumentException` (`Product.Create`)
+ 3. Назва товару не порожня — `ArgumentException` (`Product.Create`)
+ 4. Одиниця виміру не порожня — `ArgumentException` (`Product.Create`)
+ 5. Початковий залишок не від'ємний — `ArgumentOutOfRangeException` (`Product.Create`)
+ 6. Кількість приходу > 0 — `ArgumentOutOfRangeException` (`Product.RegisterArrival`)
+ 7. Кількість видачі > 0 — `ArgumentOutOfRangeException` (`Product.Issue`)
+ 8. Видача не більша за поточний залишок — `InvalidOperationException` (`Product.Issue`)
+ 9. Перехід статусу лише за дозволеною схемою — `InvalidOperationException` (`Product.ChangeStatus`)
+ 10. `Id`/назва/розташування складу обов'язкові — `ArgumentException` (`Warehouse.Create`)
+ 11. Місткість складу > 0 — `ArgumentOutOfRangeException` (`Warehouse.Create`)
+ 12. Прихід не перевищує місткість складу, інваріант на дві сутності —
+     `InvalidOperationException` (`WarehouseCapacityPolicy.EnsureCanAcceptArrival`)
 
  ### Додаткові завдання
 
- **1. Зв'язок з тижнем 3** — `Core/Import/ProductDomainImporter.ToDomain(ImportResult<ProductDto>)`
- перетворює вже розібрані DTO на сутності через `FromDto`, об'єднуючи в одному
- `ImportResult<Product>` і помилки парсингу (тиждень 3), і помилки доменних
- інваріантів (тиждень 4) — та сама ідея "дані + помилки", тепер у два рівні.
+ 1. **Import → Domain** — `ProductDomainImporter.ToDomain` перетворює
+    `ImportResult<ProductDto>` на `ImportResult<Product>`, об'єднуючи помилки парсингу
+    й доменної валідації в одному результаті.
+ 2. **Інваріант на дві сутності** — `WarehouseCapacityPolicy` (не метод `Product`/
+    `Warehouse`, бо жодна сутність одноосібно не володіє сумарним залишком складу —
+    прообраз майбутнього `CatalogService`).
+ 3. **Явний стан** — `enum ProductStatus` + `Product.ChangeStatus`, допустимі переходи
+    перевіряються `switch`-виразом з tuple-патерном.
 
- **2. Інваріант на дві сутності** — `Core/Domain/WarehouseCapacityPolicy.EnsureCanAcceptArrival`
- перевіряє, що прихід не перевищить місткість складу, з огляду на сумарний залишок
- усіх товарів на ньому. Це навмисно **не метод** `Product` чи `Warehouse`: жодна з
- двох сутностей одноосібно не володіє сумарним залишком по складу (це колекція, якою
- на 5-му тижні керуватиме сховище/сервіс), а `Product` і `Warehouse` не повинні мати
- прямих посилань одне на одного. Тому перевірка — окремий клас, прообраз майбутнього
- `CatalogService`.
-
- **3. Явний стан і переходи** — `Core/Domain/ProductStatus.cs` (`enum Active,
- Discontinued, Archived`) і `Product.ChangeStatus(ProductStatus)`, який звіряє пару
- "поточний → новий стан" через `switch`-вираз з tuple-патерном:
-
- ```csharp
- bool allowed = (Status, newStatus) switch
- {
-     (ProductStatus.Active, ProductStatus.Discontinued) => true,
-     (ProductStatus.Discontinued, ProductStatus.Active) => true,
-     (ProductStatus.Discontinued, ProductStatus.Archived) => true,
-     _ => false
- };
- ```
-
- `Archived` — термінальний стан (виходу з нього немає); перехід `Active → Archived`
- напряму заборонений — спершу товар має стати `Discontinued`.
- 
+ Детальний звіт з кодом, повним виводом консолі й поясненнями — `Звіт_4_ФЕІ_36_Сухар_Роман.docx`.
