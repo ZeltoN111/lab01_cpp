@@ -91,4 +91,20 @@
  3. **Явний стан** — `enum ProductStatus` + `Product.ChangeStatus`, допустимі переходи
     перевіряються `switch`-виразом з tuple-патерном.
 
+ ### Запуск додаткових завдань
+
+ Усі три завдання демонструються разом під час запуску CLI з кореня solution:
+
+ ```bash
+ dotnet run --project src/Cli -f net10.0
+ ```
+
+ Команда запускає `ProductDomainImporter.ToDomain` на `data/sample.csv`, сценарії
+ переходів `ProductStatus` і перевірку `WarehouseCapacityPolicy`. Для перевірки
+ сумісності з .NET 8 використайте:
+
+ ```bash
+ dotnet run --project src/Cli -f net8.0
+ ```
+
  Детальний звіт з кодом, повним виводом консолі й поясненнями — `Звіт_4_ФЕІ_36_Сухар_Роман.docx`.
