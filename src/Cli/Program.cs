@@ -1,79 +1,65 @@
-﻿using Core.Domain;
-using Core.Dto;
-using Core.Import;
+using Core;
+using Core.Abstractions;
+using Core.Services;
+using Core.Storage;
 
-Console.WriteLine("=== Імпорт CSV → DTO → домен (зв'язок з тижнем 3) ===");
+// Composition root: єдине місце, де створюються конкретні класи й встановлюються зв'язки.
+bool useFile = args.Contains("--file");
+string dataPath = Path.Combine(AppContext.BaseDirectory, "data", "catalog.json");
 
-string csvPath = Path.Combine("data", "sample.csv");
-ImportResult<ProductDto> parsed = ProductCsvImporter.Load(csvPath);
-ImportResult<Product> domainResult = ProductDomainImporter.ToDomain(parsed);
+bool useCache = args.Contains("--cache");
+bool useFactory = args.Contains("--factory");
 
-Console.WriteLine($"Успішно створено сутностей: {domainResult.Items.Count}");
-Console.WriteLine($"Відхилено (помилка парсингу або порушення інваріанту): {domainResult.Errors.Count}");
-foreach (string e in domainResult.Errors)
-    Console.WriteLine($"  ! {e}");
+ICatalogStore store;
+if (useFactory)
+{
+    store = StoreFactory.Create(args); // варіант B: вибір сховища винесено у фабрику
+}
+else
+{
+    store = useFile
+        ? new FileCatalogStore(dataPath)
+        : new InMemoryCatalogStore(SampleData.Products());
+    if (useCache) store = new CachingCatalogStore(store); // декоратор над будь-яким сховищем
+}
+var service = new CatalogService(store);
 
-Console.WriteLine();
-Console.WriteLine("=== Сценарій 1: успіх ===");
-Console.WriteLine();
-
-Product product = Product.Create("P-001", "sku-001", "Цемент М400 25кг", "шт", 100);
-Console.WriteLine(product);
-
-Console.WriteLine();
-
-product.RegisterArrival(50);
-Console.WriteLine(product);
-
-
-Console.WriteLine();
-
-product.Issue(30);
-Console.WriteLine(product);
-
+Console.WriteLine($"Сховище: {store.GetType().Name}");
+if (useFile) Console.WriteLine($"Файл: {dataPath}");
 Console.WriteLine();
 
+// --- Сценарій 1: додати, змінити, знайти, показати список
+Console.WriteLine($"Записів на старті: {service.All().Count}");
 
-product.ChangeStatus(ProductStatus.Discontinued);
-Console.WriteLine($"Статус товару {product.Sku}: {product.Status}");
+var created = service.Add("SKU-101", "Кабель UTP cat6", "м", 50);
+Console.WriteLine($"Додано: {created}");
 
-Console.WriteLine();
+service.Receive(created.Id, 25);
+Console.WriteLine($"Прихід +25 → {service.Find(created.Id)}");
 
-Warehouse warehouse = Warehouse.Create("W-001", "Головний склад", "Львів, вул. Промислова 1", capacity: 200);
-Console.WriteLine(warehouse);
-
-Console.WriteLine();
-
-Product sand = Product.Create("P-005", "SKU-005", "Пісок", "т", 60);
-Product[] onWarehouse = [product];
-
-WarehouseCapacityPolicy.EnsureCanAcceptArrival(warehouse, onWarehouse, incomingAmount: 50);
-Console.WriteLine($"Прихід 50 од. на склад {warehouse.Id} (було {product.Quantity}, місткість {warehouse.Capacity}) — дозволено");
+service.Issue(created.Id, 10);
+Console.WriteLine($"Видача −10 → {service.Find(created.Id)}");
 
 Console.WriteLine();
-Console.WriteLine("=== Сценарій 2: порушення інваріантів ===");
-Console.WriteLine();
-TryDo("видача більша за залишок", () => product.Issue(1000));
-Console.WriteLine();
-TryDo("порожній SKU", () => Product.Create("P-002", " ", "Пісок", "т", 10));
-Console.WriteLine();
-TryDo("від'ємний залишок", () => Product.Create("P-003", "SKU-003", "Цегла", "шт", -5));
-Console.WriteLine();
-TryDo("нульова видача", () => product.Issue(0));
-Console.WriteLine();
-TryDo("порожня назва складу", () => Warehouse.Create("W-002", " ", "Київ"));
-Console.WriteLine();
-TryDo("недопустимий перехід статусу (Active → Archived напряму)",
-    () => Product.Create("P-004", "SKU-004", "Шпаклівка", "кг", 10).ChangeStatus(ProductStatus.Archived));
-Console.WriteLine();
-TryDo("повторний перехід у той самий стан (Discontinued → Discontinued)",
-    () => product.ChangeStatus(ProductStatus.Discontinued));
-Console.WriteLine();
-TryDo("прихід, що перевищує місткість складу",
-    () => WarehouseCapacityPolicy.EnsureCanAcceptArrival(warehouse, [product, sand], incomingAmount: 50));
+Console.WriteLine($"Пошук за id={created.Id}: {service.Find(created.Id)?.Name ?? "не знайдено"}");
+Console.WriteLine($"Пошук за id=nope: {service.Find("nope")?.Name ?? "не знайдено"}");
 
 Console.WriteLine();
-Console.WriteLine($"Підсумковий залишок {product.Sku}: {product.Quantity} {product.Unit} (не змінився після відмов)");
+Console.WriteLine("Пошук з предикатом (залишок менше 100):");
+foreach (var p in service.Search(p => p.Quantity < 100))
+    Console.WriteLine($"  {p.Id,-9} {p.Name,-32} {p.Quantity,6} {p.Unit}");
+
+Console.WriteLine();
+Console.WriteLine("Список:");
+foreach (var p in service.All())
+    Console.WriteLine($"  {p.Id,-9} {p.Sku,-10} {p.Name,-32} {p.Quantity,6} {p.Unit}");
+
+// --- Сценарій 2: відмови з людськими повідомленнями
+Console.WriteLine();
+Console.WriteLine("Сценарій відмови:");
+TryDo("дубль id", () => store.Add(Core.Domain.Product.Create(created.Id, "SKU-102", "Дубль", "шт", 1)));
+TryDo("прихід на неіснуючий id", () => service.Receive("no-such-id", 5));
+TryDo("видача більша за залишок", () => service.Issue(created.Id, 1000));
 
 return 0;
 
@@ -82,11 +68,10 @@ static void TryDo(string title, Action action)
     try
     {
         action();
-        Console.WriteLine($"  {title}: виняток НЕ спрацював — інваріант відсутній!");
+        Console.WriteLine($"  {title}: помилку НЕ викликано!");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"  {title}: {ex.GetType().Name} — {ex.Message}");
+        Console.WriteLine($"  {title}: {ex.Message}");
     }
 }
-

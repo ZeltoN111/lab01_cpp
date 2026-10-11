@@ -42,7 +42,6 @@ public sealed class Product
 
         return new Product(id.Trim(), sku.Trim().ToUpperInvariant(), name.Trim(), unit.Trim(), quantity, note);
     }
-
     public void RegisterArrival(int amount)
     {
         if (amount <= 0)
@@ -82,7 +81,6 @@ public sealed class Product
         Status = newStatus;
     }
 
-    // Мапінг у формат тижня 3 і назад — знадобиться сховищу тижня 5.
     public ProductDto ToDto() => new(Id, Sku, Name, Unit, Quantity, Note);
 
     public static Product FromDto(ProductDto dto) =>

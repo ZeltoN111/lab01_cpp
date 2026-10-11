@@ -17,10 +17,15 @@
        EnvironmentInfo.cs        (інформація про середовище виконання)
        Dto/                      (record-и — формат файлу: ProductDto, WarehouseDto, ImportResult<T>)
        Import/                   (парсинг CSV/JSON, міст Import → Domain)
-       Domain/                   (НОВЕ, лаба 4: сутності з поведінкою — Product, Warehouse)
+       Domain/                   (лаба 4: сутності з поведінкою — Product, Warehouse)
+       Abstractions/             (НОВЕ, лаба 5: ICatalogStore — контракт сховища)
+       Storage/                  (НОВЕ, лаба 5: InMemoryCatalogStore, FileCatalogStore, CachingCatalogStore)
+       Services/                 (НОВЕ, лаба 5: CatalogService — бізнес-операції)
+       SampleData.cs             (НОВЕ, лаба 5: 16 демонстраційних записів)
      Cli/
        Cli.csproj                (ProjectReference на Core; multi-targeting)
-       Program.cs
+       Program.cs                (composition root + сценарій)
+       StoreFactory.cs           (лаба 5, додатково: вибір сховища у фабриці)
  ```
 
  `Core` — class library без точки входу. `Cli` — консольний застосунок, залежність
@@ -54,57 +59,72 @@
    `Core/Dto`; розбір `CSV`/`JSON` через `switch expression` і pattern matching у
    `Core/Import`. Додаткові завдання: JSON-імпортер, розпізнавання мішаних рядків
    товар/склад за префіксом, статистика імпорту з `CultureInfo.InvariantCulture`.
+ - **Лаба 4**: доменна модель в `Core/Domain` — сутності `Product` і `Warehouse` з приватним
+   станом і фабрикою `Create` (конструктор приватний), 12 інваріантів з типізованими
+   винятками, `ToDto`/`FromDto` як міст до DTO тижня 3. Додатково: `ProductDomainImporter`
+   (Import → Domain), `WarehouseCapacityPolicy` (інваріант на дві сутності), `ProductStatus` з
+   дозволеними переходами через `switch`-вираз. Звіт — `Звіт_4_ФЕІ_36_Сухар_Роман.docx`.
 
- ## Лабораторна робота №4 — доменна модель: сутності, інваріанти, інкапсуляція
+ ## Лабораторна робота №5 — сервісний шар: інтерфейси, два сховища, ручний DI
 
- У `Core/Domain` з'явились сутності з власною поведінкою (на відміну від DTO тижня 3,
- які лишаються лише форматом файлу): **`Product`** (товар із залишком, операції
- прихід/видача, статус) і **`Warehouse`** (склад із місткістю). Стан інкапсульований
- (приватне поле/`private set`), створення — лише через фабричний метод `Create`
- (конструктор приватний), `ToDto`/`FromDto` — симетричний міст до DTO тижня 3
- (`FromDto` завжди йде через `Create`, тобто проходить ті самі перевірки).
+ Домен **Склад**. Сервіс більше не залежить від способу зберігання даних.
 
- ### Перелік інваріантів
+ | Роль | Тип | Файл |
+ | --- | --- | --- |
+ | Контракт | `ICatalogStore` (`List`, `GetById`, `Add`, `Update`, `Remove`) | `Core/Abstractions/ICatalogStore.cs` |
+ | Реалізація 1 | `InMemoryCatalogStore` — словник у пам'яті | `Core/Storage/InMemoryCatalogStore.cs` |
+ | Реалізація 2 | `FileCatalogStore` — кеш + JSON-файл (на диск ідуть `ProductDto`) | `Core/Storage/FileCatalogStore.cs` |
+ | Сервіс | `CatalogService` (`Add`, `Receive`, `Issue`, `All`, `Find`) | `Core/Services/CatalogService.cs` |
+ | Composition root | `Program.cs` — єдине місце з `new InMemoryCatalogStore` / `new FileCatalogStore` | `Cli/Program.cs` |
 
- 1. `Id` товару обов'язковий — `ArgumentException` (`Product.Create`)
- 2. `Sku` не порожній — `ArgumentException` (`Product.Create`)
- 3. Назва товару не порожня — `ArgumentException` (`Product.Create`)
- 4. Одиниця виміру не порожня — `ArgumentException` (`Product.Create`)
- 5. Початковий залишок не від'ємний — `ArgumentOutOfRangeException` (`Product.Create`)
- 6. Кількість приходу > 0 — `ArgumentOutOfRangeException` (`Product.RegisterArrival`)
- 7. Кількість видачі > 0 — `ArgumentOutOfRangeException` (`Product.Issue`)
- 8. Видача не більша за поточний залишок — `InvalidOperationException` (`Product.Issue`)
- 9. Перехід статусу лише за дозволеною схемою — `InvalidOperationException` (`Product.ChangeStatus`)
- 10. `Id`/назва/розташування складу обов'язкові — `ArgumentException` (`Warehouse.Create`)
- 11. Місткість складу > 0 — `ArgumentOutOfRangeException` (`Warehouse.Create`)
- 12. Прихід не перевищує місткість складу, інваріант на дві сутності —
-     `InvalidOperationException` (`WarehouseCapacityPolicy.EnsureCanAcceptArrival`)
+ Залежності: `Cli → CatalogService → ICatalogStore → InMemoryCatalogStore | FileCatalogStore`.
+ Залежність передається через конструктор вручну (`new` у `Program.cs`);
+ `Microsoft.Extensions.DependencyInjection` не підключено.
+
+ ### Запуск
+
+ ```bash
+ dotnet run --project src/Cli -f net10.0            # Сховище: InMemoryCatalogStore, дані зникають після виходу
+ dotnet run --project src/Cli -f net10.0 -- --file  # Сховище: FileCatalogStore, дані накопичуються між запусками
+ ```
+
+ У файловому режимі JSON лежить у `data/catalog.json` поруч зі збіркою
+ (`AppContext.BaseDirectory`, тобто `src/Cli/bin/Debug/net10.0/data/catalog.json`).
+ Кирилиця в ньому записана як `\uXXXX` — штатне екранування `System.Text.Json`.
+ Якщо змінити формат DTO, видаліть цей файл.
+
+ Сценарій у `Program.cs`: додати товар, оформити прихід і видачу, знайти за id, показати
+ список, потім три відмови (дубль id, прихід на неіснуючий id, видача більша за залишок) —
+ перехоплюються в `try/catch` і друкуються зрозумілим текстом.
+
+ Примітка: у файл потрапляють лише поля `ProductDto`, тому `Product.Status` після
+ перезапуску завжди `Active`.
 
  ### Додаткові завдання
 
- 1. **Import → Domain** — `ProductDomainImporter.ToDomain` перетворює
-    `ImportResult<ProductDto>` на `ImportResult<Product>`, об'єднуючи помилки парсингу
-    й доменної валідації в одному результаті.
- 2. **Інваріант на дві сутності** — `WarehouseCapacityPolicy` (не метод `Product`/
-    `Warehouse`, бо жодна сутність одноосібно не володіє сумарним залишком складу —
-    прообраз майбутнього `CatalogService`).
- 3. **Явний стан** — `enum ProductStatus` + `Product.ChangeStatus`, допустимі переходи
-    перевіряються `switch`-виразом з tuple-патерном.
+ 1. **Декоратор `CachingCatalogStore`** (`Core/Storage`) — приймає інший `ICatalogStore` у
+    конструкторі, реалізує той самий контракт і додає нову поведінку: `List()` та `GetById()`
+    запам'ятовуються, а `Add`/`Update`/`Remove` скидають кеш (відсутні записи не кешуються).
+    Обгортає будь-яку реалізацію; вмикається аргументом `--cache`.
+ 2. **Пошук з предикатом** — `CatalogService.Search(Func<Product, bool> predicate)`. Умову
+    задає викликач (`service.Search(p => p.Quantity < 100)`), інтерфейс сховища не змінюється
+    (сервіс фільтрує результат `List()`). Підготовка до тижнів 6–7.
+ 3. **Фабрика `StoreFactory.Create(args)`** (`Cli/StoreFactory.cs`) — усі `new` конкретних
+    сховищ в одному місці; вмикається аргументом `--factory`.
 
- ### Запуск додаткових завдань
+ Порівняння варіантів composition root:
 
- Усі три завдання демонструються разом під час запуску CLI з кореня solution:
-
- ```bash
- dotnet run --project src/Cli -f net10.0
- ```
-
- Команда запускає `ProductDomainImporter.ToDomain` на `data/sample.csv`, сценарії
- переходів `ProductStatus` і перевірку `WarehouseCapacityPolicy`. Для перевірки
- сумісності з .NET 8 використайте:
+ | | Усе в `Program.cs` (за замовчуванням) | `StoreFactory` (`--factory`) |
+ | --- | --- | --- |
+ | Де `new` сховищ | тернарний вибір у `Program.cs` | `StoreFactory.Create` |
+ | Читабельність | зв'язки видно в одному файлі | `Program.cs` коротший, але треба відкривати фабрику |
+ | Нові сховища/прапорці | `Program.cs` росте | зміни локалізовані у фабриці |
+ | Підходить для | двох-трьох реалізацій | кількох точок входу, що ділять вибір сховища |
 
  ```bash
- dotnet run --project src/Cli -f net8.0
+ dotnet run --project src/Cli -f net10.0 -- --cache            # пам'ять + декоратор
+ dotnet run --project src/Cli -f net10.0 -- --file --cache     # файл + декоратор
+ dotnet run --project src/Cli -f net10.0 -- --factory --file   # вибір сховища через StoreFactory
  ```
 
- Детальний звіт з кодом, повним виводом консолі й поясненнями — `Звіт_4_ФЕІ_36_Сухар_Роман.docx`.
+ Коміт: `lab05`.

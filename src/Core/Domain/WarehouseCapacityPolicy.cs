@@ -20,7 +20,7 @@ public static class WarehouseCapacityPolicy
             throw new ArgumentOutOfRangeException(nameof(incomingAmount), incomingAmount,
                 "Кількість приходу має бути більшою за нуль");
 
-        int currentTotalQuantity = productsOnWarehouse.Sum(p => p.Quantity);
+        int currentTotalQuantity = productsOnWarehouse.Sum(p => p.Quantity); // сумарний залишок усіх товарів, що вже на складі
         int projected = currentTotalQuantity + incomingAmount;
         if (projected > warehouse.Capacity)
             throw new InvalidOperationException(
