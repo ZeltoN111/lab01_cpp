@@ -7,7 +7,7 @@ namespace Core.Storage;
 
 // Той самий контракт, інша механіка: кеш у пам'яті, дозавантаження при першому
 // зверненні, запис на диск після кожної зміни. На диск ідуть DTO, а не сутності.
-public sealed class FileCatalogStore(string path) : ICatalogStore
+public sealed class FileCatalogStore(string path) : ICatalogStore // підписка на контракт
 {
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
 

@@ -20,12 +20,14 @@
        Domain/                   (лаба 4: сутності з поведінкою — Product, Warehouse)
        Abstractions/             (НОВЕ, лаба 5: ICatalogStore — контракт сховища)
        Storage/                  (НОВЕ, лаба 5: InMemoryCatalogStore, FileCatalogStore, CachingCatalogStore)
-       Services/                 (НОВЕ, лаба 5: CatalogService — бізнес-операції)
+       Services/                 (лаба 5: CatalogService; лаба 6: event Changed, FindAll)
+       Events/                   (НОВЕ, лаба 6: CatalogChangeKind, CatalogChangedEventArgs)
        SampleData.cs             (НОВЕ, лаба 5: 16 демонстраційних записів)
      Cli/
        Cli.csproj                (ProjectReference на Core; multi-targeting)
        Program.cs                (composition root + сценарій)
        StoreFactory.cs           (лаба 5, додатково: вибір сховища у фабриці)
+       Sinks.cs                  (НОВЕ, лаба 6, додатково: ConsoleSink, FileSink, LogFormat)
  ```
 
  `Core` — class library без точки входу. `Cli` — консольний застосунок, залежність
@@ -128,3 +130,45 @@
  ```
 
  Коміт: `lab05`.
+
+## Лабораторна робота №6 — доменні події, Action/Func, лямбди
+
+`CatalogService` повідомляє про зміни подією `Changed`, а Core нічого не знає про консоль
+і лог-файл (пошук `Console`/`logs` у `src/Core` порожній).
+
+| Що | Де |
+| --- | --- |
+| `enum CatalogChangeKind { Added, Received, Issued, Removed }` | `Core/Events/CatalogChangeKind.cs` |
+| `CatalogChangedEventArgs` (`Id`, `Kind`, `Delta`, `QuantityAfter`, `At`) | `Core/Events/CatalogChangedEventArgs.cs` |
+| `event EventHandler<CatalogChangedEventArgs>? Changed` + `OnChanged` (`Changed?.Invoke`) | `Core/Services/CatalogService.cs` |
+| `FindAll(Func<Product, bool>)` — значення у відповідь, тому делегат, а не подія | `CatalogService` |
+| Підписники: локальний метод `OnCatalogChanged` (консоль + `logs/app.log`) і лямбда-лічильник `(_, _) => changes++` | `Cli/Program.cs` |
+
+Подія піднімається лише після успішної зміни: якщо інваріант `Product` кинув виняток
+(від'ємний прихід, видача більша за залишок) або запису немає, повідомлення не виникає.
+`Remove` піднімає `Removed` лише коли запис справді видалено. Лог: `Path.Combine(AppContext.BaseDirectory, "logs", "app.log")`,
+каталог створюється кодом (`src/Cli/bin/Debug/net10.0/logs/app.log`).
+
+Сценарій: `Add` + `Receive` + `Issue` → «Подій отримано: 3» → `-= OnCatalogChanged` → `Receive`
+(у консолі й файлі рядка немає, лічильник = 4) → три відмови без рядків подій → `Remove`.
+
+```text
+19:28:16 Added    8f8aa4b0  +50 → залишок 50
+19:28:16 Received 8f8aa4b0  +25 → залишок 75
+19:28:16 Issued   8f8aa4b0  -10 → залишок 65
+```
+
+### Додаткові завдання
+
+1. **`INotificationSink`** (`Core/Abstractions`) з реалізаціями `ConsoleSink` і `FileSink` (`Cli/Sinks.cs`);
+   сервіс отримує їх через конструктор: `new CatalogService(store, [new ConsoleSink(), new FileSink(logPath)])`.
+   Запуск: `dotnet run --project src/Cli -f net10.0 -- --sinks`.
+2. **`Action<string>`** — `ProductDomainImporter.ToDomain(parsed, onSkipped)` повідомляє про кожен
+   пропущений рядок через колбек; у Cli це `skipped => Console.WriteLine(...)`.
+
+| | Подія `Changed` | `INotificationSink` у конструкторі |
+| --- | --- | --- |
+| Підписка | довільна кількість, у будь-який момент | фіксується при створенні сервісу |
+| Відписка | `-=` | немає (потрібен новий сервіс) |
+| Сервіс знає | лише що «щось сталося» | інтерфейс одержувача |
+| Підходить для | UI, тести, довільні клієнти (тижні 8, 10, 12) | постійні одержувачі, обов'язкові залежності |
