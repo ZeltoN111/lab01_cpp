@@ -1,7 +1,8 @@
-using Core;
+﻿using Core;
 using Core.Abstractions;
 using Core.Events;
 using Core.Import;
+using Core.Reports;
 using Core.Services;
 using Core.Storage;
 
@@ -25,18 +26,17 @@ else
     if (useCache) store = new CachingCatalogStore(store); // декоратор над будь-яким сховищем
 }
 
-// Лаба 6: лог-файл формується через Path.Combine, каталог створюється кодом.
+
 var logPath = Path.Combine(AppContext.BaseDirectory, "logs", "app.log");
 Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
 
-// --sinks: додаткове завдання 1 — ті самі сповіщення, але через INotificationSink у конструкторі
-// (замість підписки на подію). Порівняння з подією — у README.
+
 bool useSinks = args.Contains("--sinks");
 var service = useSinks
     ? new CatalogService(store, [new ConsoleSink(), new FileSink(logPath)])
     : new CatalogService(store);
 
-// --- Підписка (лаба 6): локальний метод, щоб потім можна було відписатися
+
 void OnCatalogChanged(object? sender, CatalogChangedEventArgs e)
 {
     var line = LogFormat.Line(e);
@@ -51,10 +51,20 @@ void OnCatalogChanged(object? sender, CatalogChangedEventArgs e)
     }
 }
 
-// Другий підписник — лямбда із замиканням над локальною змінною
+
 int changes = 0;
-if (!useSinks) service.Changed += OnCatalogChanged; // у режимі --sinks вивід робить sink
+if (!useSinks) service.Changed += OnCatalogChanged;
 service.Changed += (_, _) => changes++;
+
+// Лаба 7: підкоманда — перший аргумент без "--" (прапорці --file/--cache не є назвою звіту).
+// Без підкоманди виконується звіт report-top; сценарій лаб 5-6 доступний як "scenario".
+var command = args.FirstOrDefault(a => !a.StartsWith("--")) ?? "report-top";
+if (command != "scenario")
+{
+    // --empty: порожнє джерело, щоб показати, що звіти не падають.
+    IReadOnlyList<Core.Domain.Product> items = args.Contains("--empty") ? [] : service.All();
+    return RunReport(command, items);
+}
 
 Console.WriteLine($"Сховище: {store.GetType().Name}");
 if (useFile) Console.WriteLine($"Файл: {dataPath}");
@@ -134,4 +144,64 @@ static void TryDo(string title, Action action)
     {
         Console.WriteLine($"  {title}: {ex.Message}");
     }
+}
+
+static int RunReport(string command, IReadOnlyList<Core.Domain.Product> items)
+{
+    switch (command)
+    {
+        case "report-top":
+            Print(ReportService.TopByQuantity(items, 5));
+            break;
+        case "report-low":
+            Print(ReportService.LowStock(items, 10));
+            break;
+        case "report-groups":
+            PrintGroups(ReportService.ByUnit(items));
+            break;
+        case "report-sum":
+            var t = ReportService.Totals(items);
+            Console.WriteLine($"  позицій {t.Items}, всього {t.Total}, середнє {t.Average:F2}, макс {t.Max}");
+            break;
+        case "report-top-units": // TopBy вдруге
+            PrintGroups(ReportService.TopUnits(items, 3));
+            break;
+        case "report-groups-query": // той самий звіт у синтаксисі запитів
+            PrintGroups(ReportService.ByUnitQuery(items));
+            break;
+        case "report-movements": // Join і GroupJoin
+            Console.WriteLine("  Join (лише товари з рухами):");
+            foreach (var m in ReportService.Movements(items, SampleData.Movements()))
+                Console.WriteLine($"    {m.Sku,-10} {m.Delta,6:+0;-0}");
+            Console.WriteLine("  GroupJoin (усі товари):");
+            foreach (var s in ReportService.MovementSummaries(items, SampleData.Movements()))
+                Console.WriteLine($"    {s.Sku,-10} {s.Name,-32} рухів: {s.Moves,2}  разом: {s.NetDelta,6:+0;-0;0}");
+            break;
+        case "report-deferred": // відкладене виконання
+            var d = DeferredExecutionDemo.Run(items);
+            Console.WriteLine($"  Дефіцитних до змін: {d.Before}");
+            Console.WriteLine($"  Дефіцитних після змін: {d.After}");
+            Console.WriteLine($"  У знімку лишилось: {d.SnapshotCountAfterClear} (джерело після Clear: {d.SourceCountAfterClear})");
+            break;
+        case "report-bench":
+            Benchmark.Run();
+            break;
+        default:
+            Console.WriteLine("report-top | report-low | report-groups | report-sum | report-top-units |");
+            Console.WriteLine("report-groups-query | report-movements | report-deferred | report-bench | scenario");
+            break;
+    }
+    return 0;
+}
+
+static void Print(IReadOnlyList<StockLine> lines)
+{
+    foreach (var l in lines)
+        Console.WriteLine($"  {l.Sku,-10} {l.Name,-32} {l.Quantity,6} {l.Unit}");
+}
+
+static void PrintGroups(IReadOnlyList<GroupSummary> groups)
+{
+    foreach (var g in groups)
+        Console.WriteLine($"  {g.Key,-6} позицій: {g.Count,3}  сумарно: {g.TotalQuantity,6}");
 }

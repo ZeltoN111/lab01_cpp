@@ -22,12 +22,14 @@
        Storage/                  (НОВЕ, лаба 5: InMemoryCatalogStore, FileCatalogStore, CachingCatalogStore)
        Services/                 (лаба 5: CatalogService; лаба 6: event Changed, FindAll)
        Events/                   (НОВЕ, лаба 6: CatalogChangeKind, CatalogChangedEventArgs)
-       SampleData.cs             (НОВЕ, лаба 5: 16 демонстраційних записів)
+       Reports/                  (НОВЕ, лаба 7: StockLine, GroupSummary, ReportService, TopBy, демо, варіанти)
+       SampleData.cs             (лаба 5; лаба 7: розширено до 20 записів + Movements() + Generate())
      Cli/
        Cli.csproj                (ProjectReference на Core; multi-targeting)
        Program.cs                (composition root + сценарій)
        StoreFactory.cs           (лаба 5, додатково: вибір сховища у фабриці)
        Sinks.cs                  (НОВЕ, лаба 6, додатково: ConsoleSink, FileSink, LogFormat)
+       Benchmark.cs              (НОВЕ, лаба 7, додатково: Stopwatch на 100 000 записів)
  ```
 
  `Core` — class library без точки входу. `Cli` — консольний застосунок, залежність
@@ -172,3 +174,91 @@
 | Відписка | `-=` | немає (потрібен новий сервіс) |
 | Сервіс знає | лише що «щось сталося» | інтерфейс одержувача |
 | Підходить для | UI, тести, довільні клієнти (тижні 8, 10, 12) | постійні одержувачі, обов'язкові залежності |
+
+## Лабораторна робота №7 — звіти через LINQ to Objects
+
+Аналітика над колекцією `Product`: усі запити в `Core/Reports`, у `Cli` лише виклики й вивід
+(у `Program.cs` немає жодного `Where`/`GroupBy`). Звіти — чисті функції над `IEnumerable<Product>`,
+повертають `IReadOnlyList<DTO>` (не сутності). Лише LINQ to Objects, без PLINQ.
+
+| Метод | Питання | Оператори |
+| --- | --- | --- |
+| `LowStock(source, n)` | Яких позицій бракує (< n)? | `Where` → `OrderBy`/`ThenBy` → `Select` → `ToList` |
+| `TopByQuantity(source, n)` | Які n позицій мають найбільший залишок? | `TopBy` (= `OrderByDescending` + `ThenBy(Sku)` + `Take`) → `Select` |
+| `ByUnit(source)` | Як залишки розподілені за одиницями? | `GroupBy` (+`OrdinalIgnoreCase`) → `Select` (`Count`, `Sum`) → `OrderByDescending` |
+| `Totals(source)` | Скільки позицій, сума, середнє, максимум? | `Count`, `Sum`, `Average`, `Max`; порожнє джерело → нулі |
+
+Підкоманди: `report-top` (за замовчуванням), `report-low`, `report-groups`, `report-sum`, а також
+додаткові `report-top-units`, `report-groups-query`, `report-movements`, `report-deferred`, `report-bench`.
+Сценарій лаб. 5–6 тепер запускається як `scenario`. Прапорець `--empty` підставляє порожнє джерело
+(звіти не падають), `--file`/`--cache` не сприймаються як назва звіту.
+
+```bash
+dotnet run --project src/Cli -f net10.0 -- report-groups
+dotnet run --project src/Cli -f net10.0 -- report-sum
+dotnet run --project src/Cli -f net10.0 -- report-low --empty
+```
+
+Фрагмент `GroupBy` з проєкцією:
+
+```csharp
+source.GroupBy(p => p.Unit, StringComparer.OrdinalIgnoreCase)       // g.Key — значення одиниці
+      .Select(g => new GroupSummary(g.Key, g.Count(), g.Sum(p => p.Quantity)))
+      .OrderByDescending(s => s.TotalQuantity).ThenBy(s => s.Key, StringComparer.Ordinal)
+      .ToList();
+```
+
+Вивід на `SampleData` (20 записів, 7 одиниць):
+
+```text
+> report-top                         > report-low
+  SKU-004  Цегла червона   5000 шт     SKU-017  Бетонозмішувач 160л   3 шт
+  SKU-016  Арматура d12    2000 м      SKU-018  Мембрана покрівельна  7 м²
+  SKU-010  Кабель ВВГнг    1500 м      SKU-013  Дошка обрізна         8 м³
+  SKU-011  Труба ПП 25мм    800 м
+  SKU-015  Плиточний клей   700 кг
+> report-groups
+  шт  позицій: 6  сумарно: 5737     м   позицій: 3  сумарно: 4300     кг  позицій: 3  сумарно: 1090
+  л   позицій: 2  сумарно:  400     м²  позицій: 2  сумарно:  267     т   позицій: 3  сумарно:   90
+  м³  позицій: 1  сумарно:    8
+> report-sum
+  позицій 20, всього 11892, середнє 594,60, макс 5000
+```
+
+### Відкладене виконання (крок 3)
+
+`query = source.Where(p => p.Quantity < 10)` лише *описує* відбір — жодного елемента на цьому рядку
+не перевіряється. Запит виконується щоразу, коли його перебирають: кожен виклик `Count()` проходить
+`source` заново. Перший `Count()` дав **3** дефіцитні позиції, потім у `source` додали «Скобу»
+(залишок 3), і другий `Count()` дав **4** — запит не зберігає результат, він бачить поточний стан
+джерела. `ToList()` фіксує результат: після `source.Clear()` у знімку лишаються ті самі 4 елементи,
+бо `snapshot.Count` — властивість готового списку, а не повторний прохід (`query.Count()` — метод).
+Демо — `DeferredExecutionDemo` у Core, друкує `report-deferred`.
+
+### Додаткові завдання
+
+1. **Join / GroupJoin** — `ReportService.Movements` (`Join`: лише товари з рухами, запис про неіснуючий
+   `P-999` відкидається) і `MovementSummaries` (`GroupJoin`: усі 20 товарів, у тих, що без рухів, `Moves = 0`).
+   Результат — DTO `MovementLine`, `MovementSummary`. Команда `report-movements`.
+2. **Власний `TopBy<T>(source, key, n, tieBreaker)`** (`Core/Reports/EnumerableExtensions.cs`) — використано
+   у двох звітах: `TopByQuantity` і `TopUnits` (команда `report-top-units`).
+3. **Синтаксис запитів** — `ByUnitQuery` (`from … group … into g … orderby … select`), команда
+   `report-groups-query`, результат ідентичний `ByUnit`. Порівняння: для групування з агрегатами
+   `from/group/into` читається майже як речення, а `into g` явно показує перехід від товарів до груп.
+   Але `Where`/`Take`/`ThenBy` з компаратором у ньому незручні: у query syntax не можна передати
+   `StringComparer` (тому «шт» і «ШТ» там лишилися б різними групами) і для `.ToList()` потрібні дужки.
+   Тому в основному завданні — ланцюжок методів.
+4. **Stopwatch на 100 000 записів** (`report-bench`, середнє з 20 прогонів після прогріву, Debug, net10.0, кілька запусків):
+
+   | Варіант | Час, мс |
+   | --- | ---: |
+   | A: потоковий ланцюжок без `ToList` | 13–17 |
+   | B: `ToList` посеред ланцюжка | 12–17 |
+   | C: один запит перебрано тричі (`Count`, `Sum`, `Max`) | 7–13 |
+   | D: той самий запит, `ToList` один раз | 5–8 |
+
+   Висновок: проміжний `ToList` (A vs B) суттєвої різниці не дає — різниця в межах шуму, `GroupBy` усе одно
+   буферизує дані, а зайва копія коштує лише пам'яті. Повторне перебирання (C vs D) помітно повільніше:
+   `Where` виконується тричі замість одного разу.
+
+Коміт: `lab07`.

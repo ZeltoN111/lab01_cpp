@@ -62,7 +62,6 @@ public sealed class CatalogService(ICatalogStore store, IEnumerable<INotificatio
     public Product? Find(string id) => _store.GetById(id);
 
     // Пошук за довільною умовою: критерій задає той, хто викликає.
-    // Func (а не подія), бо потрібне значення у відповідь.
     public IReadOnlyList<Product> FindAll(Func<Product, bool> predicate)
     {
         ArgumentNullException.ThrowIfNull(predicate);
