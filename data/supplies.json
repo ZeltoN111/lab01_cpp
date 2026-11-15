@@ -1,0 +1,22 @@
+[
+  {"Id": "P-021", "Sku": "SKU-021", "Name": "Цемент М500 25кг", "Unit": "шт", "Quantity": 80},
+  {"Id": "P-022", "Sku": "SKU-022", "Name": "Пісок кварцовий", "Unit": "т", "Quantity": 12},
+  {"Id": "P-023", "Sku": "SKU-023", "Name": "Щебінь гранітний 20-40", "Unit": "т", "Quantity": 25},
+  {"Id": "P-024", "Sku": "SKU-024", "Name": "Блок газобетонний D500", "Unit": "шт", "Quantity": 640},
+  {"Id": "P-025", "Sku": "SKU-025", "Name": "Шпаклівка стартова", "Unit": "кг", "Quantity": 450},
+  {"Id": "P-026", "Sku": "SKU-026", "Name": "Гіпсокартон вологостійкий", "Unit": "шт", "Quantity": 90},
+  {"Id": "P-001", "Sku": "SKU-001", "Name": "Цемент М400 25кг", "Unit": "шт", "Quantity": 120},
+  {"Id": "P-027", "Sku": "SKU-027", "Name": "Профіль UD 27", "Unit": "шт", "Quantity": 350},
+  {"Id": "P-028", "Sku": "SKU-028", "Name": "Ґрунтовка адгезійна", "Unit": "л", "Quantity": 60},
+  {"Id": "P-029", "Sku": "SKU-029", "Name": "Фарба фасадна", "Unit": "л", "Quantity": 140},
+  {"Id": "P-030", "Sku": "SKU-030", "Name": "Кабель ВВГнг 3x1.5", "Unit": "м", "Quantity": 1200},
+  {"Id": "P-031", "Sku": "SKU-031", "Name": "Труба ПП 32мм", "Unit": "м", "Quantity": 500},
+  {"Id": "P-032", "Sku": "SKU-032", "Name": "Пінопласт ПСБ-С 50мм", "Unit": "м²", "Quantity": 310},
+  {"Id": "P-004", "Sku": "SKU-004", "Name": "Цегла червона", "Unit": "шт", "Quantity": 5000},
+  {"Id": "P-033", "Sku": "SKU-033", "Name": "Брус 100x100", "Unit": "м³", "Quantity": 6},
+  {"Id": "P-034", "Sku": "SKU-034", "Name": "Дюбель-цвях 6x40", "Unit": "кг", "Quantity": 45},
+  {"Id": "P-035", "Sku": "SKU-035", "Name": "Клей для газоблоку", "Unit": "кг", "Quantity": 900},
+  {"Id": "P-036", "Sku": "SKU-036", "Name": "Сітка кладочна", "Unit": "м²", "Quantity": 150},
+  {"Id": "P-037", "Sku": "SKU-037", "Name": "Затирка для швів", "Unit": "кг", "Quantity": 4},
+  {"Id": "P-010", "Sku": "SKU-010", "Name": "Кабель ВВГнг 3x2.5", "Unit": "м", "Quantity": 1500}
+]

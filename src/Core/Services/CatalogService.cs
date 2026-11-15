@@ -34,7 +34,7 @@ public sealed class CatalogService(ICatalogStore store, IEnumerable<INotificatio
     public void Receive(string id, int quantity)
     {
         var product = _store.GetById(id)
-            ?? throw new InvalidOperationException($"Немає запису з id={id}.");
+            ?? throw new DomainException($"Немає запису з id={id}.");
         product.RegisterArrival(quantity); // якщо кине виняток — події не буде
         _store.Update(product);
         OnChanged(product, CatalogChangeKind.Received, quantity);
@@ -43,7 +43,7 @@ public sealed class CatalogService(ICatalogStore store, IEnumerable<INotificatio
     public void Issue(string id, int quantity)
     {
         var product = _store.GetById(id)
-            ?? throw new InvalidOperationException($"Немає запису з id={id}.");
+            ?? throw new DomainException($"Немає запису з id={id}.");
         product.Issue(quantity);
         _store.Update(product);
         OnChanged(product, CatalogChangeKind.Issued, -quantity);
@@ -54,6 +54,62 @@ public sealed class CatalogService(ICatalogStore store, IEnumerable<INotificatio
         var product = _store.GetById(id);
         if (product is null || !_store.Remove(id)) return false; // нічого не видалено — події немає
         OnChanged(product, CatalogChangeKind.Removed, -product.Quantity, quantityAfter: 0);
+        return true;
+    }
+
+    // Лаба 8: імпортер приходить параметром (ручний DI тижня 5), подія — для кожного доданого запису (тиждень 6).
+    public async Task<int> ImportAsync(ICatalogImporter importer, string path, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(importer);
+        ct.ThrowIfCancellationRequested();
+
+        var items = await importer.LoadAsync(path, ct);
+        var added = 0;
+        foreach (var item in items)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (TryAddImported(item)) added++;
+        }
+        return added;
+    }
+
+    // Додаткове завдання 1: потоковий імпорт — запис додається одразу після прочитання.
+    public async Task<int> ImportStreamAsync(
+        IStreamingCatalogImporter importer, string path, IProgress<int>? progress = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(importer);
+
+        var added = 0;
+        await foreach (var item in importer.StreamAsync(path, progress, ct))
+        {
+            if (TryAddImported(item)) added++;
+        }
+        return added;
+    }
+
+    // Додаткове завдання 2: зв'язаний токен «користувач АБО тайм-аут». Якщо спрацював саме тайм-аут,
+    // кидаємо TimeoutException, щоб викликач відрізнив його від Ctrl+C.
+    public async Task<int> ImportWithTimeoutAsync(
+        ICatalogImporter importer, string path, TimeSpan timeout, CancellationToken userToken = default)
+    {
+        using var timeoutCts = new CancellationTokenSource(timeout);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(userToken, timeoutCts.Token);
+        try
+        {
+            return await ImportAsync(importer, path, linked.Token);
+        }
+        catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested && !userToken.IsCancellationRequested)
+        {
+            throw new TimeoutException($"Імпорт не завершився за {timeout.TotalMilliseconds:0} мс.", ex);
+        }
+    }
+
+    // Ідемпотентність: повторний імпорт того самого файлу нічого не дублює.
+    private bool TryAddImported(Product item)
+    {
+        if (_store.GetById(item.Id) is not null) return false;
+        _store.Add(item);
+        OnChanged(item, CatalogChangeKind.Added, item.Quantity);
         return true;
     }
 

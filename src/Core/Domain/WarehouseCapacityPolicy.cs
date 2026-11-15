@@ -23,7 +23,7 @@ public static class WarehouseCapacityPolicy
         int currentTotalQuantity = productsOnWarehouse.Sum(p => p.Quantity); // сумарний залишок усіх товарів, що вже на складі
         int projected = currentTotalQuantity + incomingAmount;
         if (projected > warehouse.Capacity)
-            throw new InvalidOperationException(
+            throw new DomainException(
                 $"Склад {warehouse.Id} не вмістить прихід: місткість {warehouse.Capacity}, " +
                 $"поточний залишок {currentTotalQuantity}, після приходу було б {projected}");
     }

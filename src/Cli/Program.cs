@@ -1,4 +1,4 @@
-﻿using Core;
+using Core;
 using Core.Abstractions;
 using Core.Events;
 using Core.Import;
@@ -59,6 +59,17 @@ service.Changed += (_, _) => changes++;
 // Лаба 7: підкоманда — перший аргумент без "--" (прапорці --file/--cache не є назвою звіту).
 // Без підкоманди виконується звіт report-top; сценарій лаб 5-6 доступний як "scenario".
 var command = args.FirstOrDefault(a => !a.StartsWith("--")) ?? "report-top";
+
+// Лаба 8: асинхронний імпорт постачань (top-level await) і генерація великого файлу для скасування.
+if (command == "import")
+{
+    service.Changed -= OnCatalogChanged; // на сотнях тисяч записів рядок у консоль на кожну подію лише гальмує
+    var result = await ImportCommand.RunAsync(service, args);
+    Console.WriteLine($"  подій Added: {changes}");
+    return result;
+}
+if (command == "gen-big") return await ImportCommand.GenerateBigAsync(args);
+
 if (command != "scenario")
 {
     // --empty: порожнє джерело, щоб показати, що звіти не падають.
@@ -189,6 +200,7 @@ static int RunReport(string command, IReadOnlyList<Core.Domain.Product> items)
         default:
             Console.WriteLine("report-top | report-low | report-groups | report-sum | report-top-units |");
             Console.WriteLine("report-groups-query | report-movements | report-deferred | report-bench | scenario");
+            Console.WriteLine("import [шлях] [--stream] [--cancel-after=мс] [--timeout=мс] | gen-big [кількість]");
             break;
     }
     return 0;

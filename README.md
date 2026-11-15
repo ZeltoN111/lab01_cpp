@@ -30,6 +30,9 @@
        StoreFactory.cs           (лаба 5, додатково: вибір сховища у фабриці)
        Sinks.cs                  (НОВЕ, лаба 6, додатково: ConsoleSink, FileSink, LogFormat)
        Benchmark.cs              (НОВЕ, лаба 7, додатково: Stopwatch на 100 000 записів)
+       ImportCommand.cs          (НОВЕ, лаба 8: import / gen-big, Ctrl+C, ConsoleProgress)
+   tests/
+     Core.Tests/                 (НОВЕ, лаба 8: xUnit, посилається лише на Core)
  ```
 
  `Core` — class library без точки входу. `Cli` — консольний застосунок, залежність
@@ -262,3 +265,56 @@ source.GroupBy(p => p.Unit, StringComparer.OrdinalIgnoreCase)       // g.Key —
    `Where` виконується тричі замість одного разу.
 
 Коміт: `lab07`.
+
+## Лабораторна робота №8 — async/await, скасування, доменні винятки, unit-тести Core
+
+| Що | Де |
+| --- | --- |
+| `DomainException` — порушення бізнес-правила («кількість не може бути 0», видача більша за залишок, недозволений перехід стану, немає запису) | `Core/DomainException.cs` |
+| `StorageException` — технічна помилка файлу (зіпсований JSON), `JsonException` зберігається в `InnerException` | `Core/StorageException.cs` |
+| `ICatalogImporter.LoadAsync(path, ct)` | `Core/Abstractions/ICatalogImporter.cs` |
+| `JsonCatalogImporter` — `FileStream(useAsync: true)` + `JsonSerializer.DeserializeAsync`, `ThrowIfCancellationRequested` у циклі | `Core/Storage/JsonCatalogImporter.cs` |
+| `CatalogService.ImportAsync(importer, path, ct)` — ідемпотентний, подія `Added` на кожен доданий запис | `Core/Services/CatalogService.cs` |
+| `import` у Cli: top-level `await`, `Console.CancelKeyPress`, окремі `catch` | `Cli/ImportCommand.cs` |
+| 19 тестів (`[Fact]`, `[Theory]`), сховище `InMemoryCatalogStore`, власний `TestData` | `tests/Core.Tests` |
+
+Асинхронним став лише імпорт файлу (ввід-вивід). Сховище, звіти й події лишились синхронними:
+вони працюють з пам'яттю, асинхронність там нічого не дала б.
+
+### Тести
+
+```bash
+dotnet test
+```
+
+Очікувано: `Passed! - Failed: 0, Passed: 19, Skipped: 0`. Тести не читають `data/` з репозиторію:
+три тести пишуть тимчасовий файл у `Path.GetTempPath()` і видаляють його у `finally`.
+
+### Імпорт і скасування
+
+```bash
+dotnet run --project src/Cli -f net10.0 -- import                              # data/supplies.json → Імпортовано записів: 17
+dotnet run --project src/Cli -f net10.0 -- import data/supplies_bad.json       # Дані відхилено: Запис 3: ...
+dotnet run --project src/Cli -f net10.0 -- import data/supplies_broken.json    # Файл пошкоджено: ...
+dotnet run --project src/Cli -f net10.0 -- gen-big 1000000                     # великий файл у bin/.../data/big.json
+dotnet run --project src/Cli -f net10.0 -- import src/Cli/bin/Debug/net10.0/data/big.json --cancel-after=2000   # Імпорт скасовано.
+```
+
+Ctrl+C під час імпорту великого файлу теж дає «Імпорт скасовано.», а не стектрейс.
+`supplies.json` містить 20 записів, 3 з яких (`P-001`, `P-004`, `P-010`) уже є в сховищі, тому додається 17.
+
+### Додаткові завдання
+
+1. **Потоковий імпорт** — `IStreamingCatalogImporter.StreamAsync` повертає `IAsyncEnumerable<Product>`
+   (`DeserializeAsyncEnumerable`), параметр токена з `[EnumeratorCancellation]`; сервіс читає його через
+   `await foreach` (`ImportStreamAsync`). Прапорець `--stream`.
+2. **Зв'язані токени** — `ImportWithTimeoutAsync` об'єднує токен користувача і токен тайм-ауту через
+   `CreateLinkedTokenSource`; якщо спрацював тайм-аут, кидає `TimeoutException`. Прапорець `--timeout=мс`,
+   тести `ImportWithTimeout_*` показують, що тайм-аут і Ctrl+C розрізняються.
+3. **`IProgress<int>`** — `StreamAsync` повідомляє відсоток прочитаного файлу, `ConsoleProgress` у Cli малює
+   `прочитано: 42% [########            ]`.
+4. **Покриття** — `dotnet test --collect:"XPlat Code Coverage"`: 32% рядків Core загалом; `JsonCatalogImporter`
+   90%, `CatalogService` 74%. Не покриті код лаб 3–7 (CSV-імпортери, `FileCatalogStore`, демо й бенчмарк звітів),
+   до яких ця лаба не торкалася.
+
+Коміт: `lab08`.

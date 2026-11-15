@@ -42,22 +42,25 @@ public sealed class Product
 
         return new Product(id.Trim(), sku.Trim().ToUpperInvariant(), name.Trim(), unit.Trim(), quantity, note);
     }
+    // Лаба 8: 0 — порушення бізнес-правила (DomainException), від'ємне число — некоректний аргумент.
     public void RegisterArrival(int amount)
     {
-        if (amount <= 0)
+        EnsureNonZero(amount);
+        if (amount < 0)
             throw new ArgumentOutOfRangeException(nameof(amount), amount,
-                "Кількість приходу має бути більшою за нуль");
+                "Кількість приходу не може бути від'ємною");
 
         _quantity += amount;
     }
 
     public void Issue(int amount)
     {
-        if (amount <= 0)
+        EnsureNonZero(amount);
+        if (amount < 0)
             throw new ArgumentOutOfRangeException(nameof(amount), amount,
-                "Кількість видачі має бути більшою за нуль");
+                "Кількість видачі не може бути від'ємною");
         if (amount > _quantity)
-            throw new InvalidOperationException(
+            throw new DomainException(
                 $"Не можна видати {amount}: залишок {Sku} = {_quantity}");
 
         _quantity -= amount;
@@ -75,10 +78,16 @@ public sealed class Product
         };
 
         if (!allowed)
-            throw new InvalidOperationException(
+            throw new DomainException(
                 $"Товар {Sku}: перехід зі стану {Status} у {newStatus} неможливий");
 
         Status = newStatus;
+    }
+
+    private void EnsureNonZero(int amount)
+    {
+        if (amount == 0)
+            throw new DomainException($"Товар {Sku}: кількість не може бути 0");
     }
 
     public ProductDto ToDto() => new(Id, Sku, Name, Unit, Quantity, Note);
