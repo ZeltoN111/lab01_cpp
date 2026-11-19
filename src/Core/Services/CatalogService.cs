@@ -57,7 +57,7 @@ public sealed class CatalogService(ICatalogStore store, IEnumerable<INotificatio
         return true;
     }
 
-    // Лаба 8: імпортер приходить параметром (ручний DI тижня 5), подія — для кожного доданого запису (тиждень 6).
+    // Лаба 8: імпортер приходить параметром, подія — для кожного доданого запису (тиждень 6).
     public async Task<int> ImportAsync(ICatalogImporter importer, string path, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(importer);

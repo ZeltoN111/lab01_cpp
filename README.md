@@ -23,6 +23,7 @@
        Services/                 (лаба 5: CatalogService; лаба 6: event Changed, FindAll)
        Events/                   (НОВЕ, лаба 6: CatalogChangeKind, CatalogChangedEventArgs)
        Reports/                  (НОВЕ, лаба 7: StockLine, GroupSummary, ReportService, TopBy, демо, варіанти)
+       Configuration/            (НОВЕ, лаба 9: AppOptions, StorageOptions, LoggingOptions, WarehouseOptions)
        SampleData.cs             (лаба 5; лаба 7: розширено до 20 записів + Movements() + Generate())
      Cli/
        Cli.csproj                (ProjectReference на Core; multi-targeting)
@@ -31,6 +32,9 @@
        Sinks.cs                  (НОВЕ, лаба 6, додатково: ConsoleSink, FileSink, LogFormat)
        Benchmark.cs              (НОВЕ, лаба 7, додатково: Stopwatch на 100 000 записів)
        ImportCommand.cs          (НОВЕ, лаба 8: import / gen-big, Ctrl+C, ConsoleProgress)
+       AppConfig.cs              (НОВЕ, лаба 9: ConfigurationBuilder, CROSSAPP_DATA_PATH, ConsoleLog)
+       appsettings.json          (НОВЕ, лаба 9: базові налаштування, у git, без secrets)
+       appsettings.Development.json / appsettings.Production.json   (НОВЕ, лаба 9: профілі)
    tests/
      Core.Tests/                 (НОВЕ, лаба 8: xUnit, посилається лише на Core)
  ```
@@ -318,3 +322,102 @@ Ctrl+C під час імпорту великого файлу теж дає «
    до яких ця лаба не торкалася.
 
 Коміт: `lab08`.
+
+
+
+dotnet run --project src/Cli -f net10.0 -- import src/Cli/bin/Debug/net10.0/data/big.json --cancel-after=2000
+
+dotnet run --project src/Cli -f net10.0 -- import src/Cli/bin/Debug/net10.0/data/big.json
+
+dotnet run --project src/Cli -f net10.0 -- import data/supplies_bad.json
+
+
+dotnet run --project src/Cli -f net10.0 -- import src/Cli/bin/Debug/net10.0/data/big.json --stream
+
+dotnet run --project src/Cli -f net10.0 -- import src/Cli/bin/Debug/net10.0/data/big.json --timeout=2000
+
+dotnet test --collect:"XPlat Code Coverage"
+
+## Лабораторна робота №9 — шляхи, JSON, конфігурація, secrets
+
+Шляхи й налаштування більше не зашиті в код: вони приходять з `appsettings.json`, профілю,
+user-secrets, змінних середовища або аргументів. Пакети конфігурації стоять лише в `Cli`,
+`Core` містить тільки класи налаштувань (`Core/Configuration/AppOptions.cs`).
+
+Порядок джерел (пізніше перекриває раніше):
+
+```text
+appsettings.json → appsettings.{CROSSAPP_ENVIRONMENT}.json → user-secrets → змінні CROSSAPP_* → аргументи --Ключ=значення
+```
+
+### Профілі
+
+| Профіль | Як увімкнути | Лог (`Logging:MinimumLevel`) | Де дані (`Storage:Root`) |
+| --- | --- | --- | --- |
+| Development (за замовчуванням) | нічого не задавати | `Debug` — друкуються рядки `[debug]` | `AppBase`: `src/Cli/bin/Debug/net10.0/data/items.json` |
+| Production | `CROSSAPP_ENVIRONMENT=Production` | `Warning` — лише попередження й результат | `LocalAppData`: на macOS `~/Library/Application Support/CrossApp/data/items.json` |
+
+### Ключі
+
+| Ключ у JSON | Змінна середовища | За замовчуванням | Призначення |
+| --- | --- | --- | --- |
+| `EnvironmentName` | `CROSSAPP_EnvironmentName` | `Development` | назва профілю |
+| `Logging:MinimumLevel` | `CROSSAPP_Logging__MinimumLevel` | `Information` (`Debug` у Development) | `Debug`, `Information`, `Warning`, `Error` |
+| `Storage:DataPath` | `CROSSAPP_Storage__DataPath` або `CROSSAPP_DATA_PATH` | `data` | каталог даних; відносний — від `Storage:Root` |
+| `Storage:FileName` | `CROSSAPP_Storage__FileName` | `items.json` | ім'я файлу каталогу |
+| `Storage:Root` | `CROSSAPP_Storage__Root` | `AppBase` | `AppBase` (каталог збірки) або `LocalAppData` |
+| `Warehouse:DefaultUnit` | `CROSSAPP_Warehouse__DefaultUnit` | `шт` | одиниця для `add`, якщо її не вказано |
+| `Integration:ApiKey` | `CROSSAPP_Integration__ApiKey` | — | **secret**: лише user-secrets або змінна, ніколи не в `appsettings.json` |
+
+`CROSSAPP_DATA_PATH` — проста змінна, яка перекриває `Storage:DataPath` з усіх інших джерел.
+
+### Команди
+
+```bash
+dotnet run --project src/Cli -f net10.0 -- config                      # діюча конфігурація
+dotnet run --project src/Cli -f net10.0 -- export                      # колекція → items.json (атомарно)
+dotnet run --project src/Cli -f net10.0 -- import <файл.json> --file   # JSON → сховище у файлі з конфігурації
+dotnet run --project src/Cli -f net10.0 -- add SKU-500 "Цвяхи" 40 --file   # одиниця з Warehouse:DefaultUnit
+```
+
+Запуск з кореня solution, з `src/Cli` чи з будь-якого іншого каталогу дає той самий файл даних:
+базовий каталог — `AppContext.BaseDirectory`, а не поточний робочий каталог.
+
+### Перевизначення змінними
+
+bash / zsh:
+
+```bash
+CROSSAPP_DATA_PATH=/tmp/crossapp dotnet run --project src/Cli -f net10.0 -- export
+CROSSAPP_ENVIRONMENT=Production dotnet run --project src/Cli -f net10.0 -- config
+CROSSAPP_Integration__ApiKey=from-env dotnet run --project src/Cli -f net10.0 -- config
+```
+
+PowerShell:
+
+```powershell
+$env:CROSSAPP_DATA_PATH = "C:\Users\st\data"; dotnet run --project src/Cli -f net10.0 -- export
+$env:CROSSAPP_ENVIRONMENT = "Production"; dotnet run --project src/Cli -f net10.0 -- config
+Remove-Item Env:CROSSAPP_DATA_PATH
+```
+
+### Secret
+
+```bash
+dotnet user-secrets init --project src/Cli                                   # один раз: UserSecretsId у Cli.csproj
+dotnet user-secrets set "Integration:ApiKey" "local-dev-key" --project src/Cli
+dotnet user-secrets list --project src/Cli
+```
+
+Значення лежить поза репозиторієм: macOS/Linux — `~/.microsoft/usersecrets/<UserSecretsId>/secrets.json`,
+Windows — `%APPDATA%\Microsoft\UserSecrets\<UserSecretsId>\secrets.json`. У git є лише `UserSecretsId`.
+Програма друкує тільки «ApiKey: присутній, довжина N».
+
+### FileCatalogStore
+
+JSON у camelCase (`id`, `sku`, `name`, `unit`, `quantity`), кирилиця без `\uXXXX`
+(`UnsafeRelaxedJsonEscaping`), запис атомарний: `items.json.tmp` + `File.Move(..., overwrite: true)`.
+Зіпсований файл дає «Не вдалося прочитати файл даних: …», а не stack trace.
+Старий `data/catalog.json` з лаби 5 більше не використовується.
+
+Коміт: `lab09`.

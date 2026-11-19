@@ -7,8 +7,13 @@ using Core.Services;
 using Core.Storage;
 
 // Composition root: єдине місце, де створюються конкретні класи й встановлюються зв'язки.
+// Лаба 9: спершу конфігурація — шлях до даних, рівень логу, secret беруться з неї, а не з коду.
+var app = AppConfig.Load(args);
+var log = new ConsoleLog(app.Options.Logging.MinimumLevel);
+log.Debug($"Середовище: {app.Options.EnvironmentName}, рівень логу: {app.Options.Logging.MinimumLevel}");
+
 bool useFile = args.Contains("--file");
-string dataPath = Path.Combine(AppContext.BaseDirectory, "data", "catalog.json");
+string dataPath = app.DataFile;
 
 bool useCache = args.Contains("--cache");
 bool useFactory = args.Contains("--factory");
@@ -16,7 +21,7 @@ bool useFactory = args.Contains("--factory");
 ICatalogStore store;
 if (useFactory)
 {
-    store = StoreFactory.Create(args); // варіант B: вибір сховища винесено у фабрику
+    store = StoreFactory.Create(args, dataPath); // варіант B: вибір сховища винесено у фабрику
 }
 else
 {
@@ -26,6 +31,17 @@ else
     if (useCache) store = new CachingCatalogStore(store); // декоратор над будь-яким сховищем
 }
 
+
+// Зіпсований файл даних — зрозуміле повідомлення, а не stack trace.
+if (useFile)
+{
+    try { store.List(); }
+    catch (Exception ex) when (ex is StorageException or DomainException)
+    {
+        Console.WriteLine($"Не вдалося прочитати файл даних: {ex.Message}");
+        return 1;
+    }
+}
 
 var logPath = Path.Combine(AppContext.BaseDirectory, "logs", "app.log");
 Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
@@ -59,6 +75,23 @@ service.Changed += (_, _) => changes++;
 // Лаба 7: підкоманда — перший аргумент без "--" (прапорці --file/--cache не є назвою звіту).
 // Без підкоманди виконується звіт report-top; сценарій лаб 5-6 доступний як "scenario".
 var command = args.FirstOrDefault(a => !a.StartsWith("--")) ?? "report-top";
+
+// Лаба 9: команди, що працюють з файлом даних, показують, який файл узято з конфігурації.
+if (command is "config" or "export" or "import" or "add")
+{
+    log.Info($"Файл даних : {dataPath}");
+    log.Info(app.ApiKeyStatus);
+    log.Debug($"Сховище: {store.GetType().Name}");
+}
+if (command == "config") return ShowConfig(app);
+if (command == "export")
+{
+    // Експорт усієї колекції в JSON-файл з конфігурації одним атомарним записом.
+    var count = new FileCatalogStore(dataPath).ReplaceAll(service.All());
+    Console.WriteLine($"Експортовано записів: {count}");
+    return 0;
+}
+if (command == "add") return AddProduct(service, args, app.Options.Warehouse.DefaultUnit);
 
 // Лаба 8: асинхронний імпорт постачань (top-level await) і генерація великого файлу для скасування.
 if (command == "import")
@@ -130,7 +163,7 @@ service.Remove(created.Id);
 service.Changed -= OnCatalogChanged;
 Console.WriteLine($"Remove неіснуючого id → {service.Remove("nope")} (події немає)");
 
-// --- Додаткове завдання 2: Action<string> як звіт про пропущені рядки імпорту
+
 Console.WriteLine();
 Console.WriteLine("Імпорт data/sample.csv з Action<string> для пропущених рядків:");
 string csvPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "sample.csv");
@@ -201,9 +234,47 @@ static int RunReport(string command, IReadOnlyList<Core.Domain.Product> items)
             Console.WriteLine("report-top | report-low | report-groups | report-sum | report-top-units |");
             Console.WriteLine("report-groups-query | report-movements | report-deferred | report-bench | scenario");
             Console.WriteLine("import [шлях] [--stream] [--cancel-after=мс] [--timeout=мс] | gen-big [кількість]");
+            Console.WriteLine("config | export | add <sku> <назва> <кількість> [одиниця]   (+ --file: сховище у файлі з конфігурації)");
             break;
     }
     return 0;
+}
+
+// Лаба 9: діюча конфігурація після накладання всіх джерел. Secret — лише факт наявності.
+static int ShowConfig(AppConfig app)
+{
+    var o = app.Options;
+    Console.WriteLine($"  EnvironmentName       = {o.EnvironmentName}");
+    Console.WriteLine($"  Logging:MinimumLevel  = {o.Logging.MinimumLevel}");
+    Console.WriteLine($"  Storage:Root          = {app.Storage.Root}");
+    Console.WriteLine($"  Storage:DataPath      = {app.Storage.DataPath}");
+    Console.WriteLine($"  Storage:FileName      = {app.Storage.FileName}");
+    Console.WriteLine($"  Warehouse:DefaultUnit = {o.Warehouse.DefaultUnit}");
+    Console.WriteLine($"  Файл даних            = {app.DataFile}");
+    Console.WriteLine($"  {app.ApiKeyStatus}");
+    return 0;
+}
+
+// Варіант «Склад»: якщо одиницю не вказано, береться Warehouse:DefaultUnit з конфігурації.
+static int AddProduct(CatalogService service, string[] args, string defaultUnit)
+{
+    var p = args.Where(a => !a.StartsWith("--")).Skip(1).ToArray();
+    if (p.Length < 3 || !int.TryParse(p[2], out var quantity))
+    {
+        Console.WriteLine("add <sku> <назва> <кількість> [одиниця]");
+        return 1;
+    }
+    try
+    {
+        var created = service.Add(p[0], p[1], p.Length > 3 ? p[3] : defaultUnit, quantity);
+        Console.WriteLine($"Додано: {created}");
+        return 0;
+    }
+    catch (ArgumentException ex)
+    {
+        Console.WriteLine($"Не додано: {ex.Message}");
+        return 1;
+    }
 }
 
 static void Print(IReadOnlyList<StockLine> lines)

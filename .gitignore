@@ -483,3 +483,7 @@ $RECYCLE.BIN/
 
 bin/
 obj/
+# Лаба 9: файл даних каталогу створюється у рантаймі; secrets.json живе поза репозиторієм
+items.json
+*.json.tmp
+secrets.json

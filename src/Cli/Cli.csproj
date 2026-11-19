@@ -1,7 +1,24 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\Core\Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.*" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.*" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.CommandLine" Version="10.*" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.*" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.*" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="10.*" />
+  </ItemGroup>
+
+  <!-- Лаба 9: appsettings*.json копіюються поруч зі збіркою, бо конфігурація читається з AppContext.BaseDirectory. -->
+  <ItemGroup>
+    <None Update="appsettings*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
   </ItemGroup>
 
   <PropertyGroup>
@@ -9,6 +26,7 @@
     <TargetFrameworks>net10.0;net8.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <UserSecretsId>ab750a75-a09e-4d5f-b709-ceab42d849c0</UserSecretsId>
   </PropertyGroup>
 
 </Project>
